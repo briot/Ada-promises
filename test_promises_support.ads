@@ -1,11 +1,9 @@
-with Promises;
+with Promises; use Promises;
 
 package Test_Promises_Support is
    package Int_Promises is new Promises.Promises (Integer);
    package Str_Promises is new Promises.Promises (String);
-   package Int_To_Str is new Promises.Chains 
-      (Integer, Int_Promises,
-       String,  Str_Promises);
+   package Int_To_Str is new Chains (Int_Promises, Str_Promises);
 
    type Convert_Int is new Int_To_Str.Callback with null record;
    procedure Resolved

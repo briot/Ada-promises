@@ -29,14 +29,11 @@ with Ada.Containers.Vectors;
 
 package Promises is
 
-   --------------
-   -- Promises --
-   --------------
-   
    generic
       type T (<>) is private;
    package Promises is
       type Promise is tagged private;
+      subtype Result_Type is T;
    
       procedure Resolve (Self : in out Promise; R : T);
       --  Give a result to the promise, and execute all registered
@@ -47,7 +44,7 @@ package Promises is
       procedure Resolved (Self : in out Callback; R : T) is abstract;
       --  Executed when a promise is resolved. It provides the real value
       --  associated with the promise.
-
+   
       procedure When_Done
          (Self : in out Promise;
           Cb   : not null access Callback'Class);
@@ -59,7 +56,7 @@ package Promises is
    private
       package Cb_Vectors is new Ada.Containers.Vectors
          (Positive, Callback_Access);
-
+   
       type Promise is tagged record
          Callbacks : Cb_Vectors.Vector;
          --  Need a vector here, but should try to limit memory allocs.
@@ -68,37 +65,33 @@ package Promises is
       end record;
    end Promises;
 
-   ------------
-   -- Chains --
-   ------------
-   
    generic
-      type T (<>) is private;
-      with package T_Promises is new Promises (T);
-
-      type T2 (<>) is private;
-      with package T2_Promises is new Promises (T2);
+      with package Input_Promises is new Promises (<>);
+      with package Output_Promises is new Promises (<>);
    package Chains is
-      type Callback is abstract new T_Promises.Callback
+      type Callback is abstract new Input_Promises.Callback
          with private;
       procedure Resolved
-        (Self : in out Callback; P : T; Output : in out T2_Promises.Promise)
+        (Self   : in out Callback;
+         Input  : Input_Promises.Result_Type;
+         Output : in out Output_Promises.Promise)
         is abstract;
       --  This is the procedure that needs overriding, not the one inherited
-      --  from T_Promises. When chaining, a callback returns another promise,
-      --  to which the user can attach further callbacks, and so on.
-
+      --  from Input_Promises. When chaining, a callback returns another
+      --  promise, to which the user can attach further callbacks, and so on.
+   
       function When_Done
-         (Self : in out T_Promises.Promise;
+         (Self : in out Input_Promises.Promise;
           Cb   : not null access Callback'Class)
-         return access T2_Promises.Promise;
+         return access Output_Promises.Promise;
       --  Returns a new promise, which will be resolved by Cb eventually.
-
+   
    private
-      type Callback is abstract new T_Promises.Callback with record
-         Promise : aliased T2_Promises.Promise;
+      type Callback is abstract new Input_Promises.Callback with record
+         Promise : aliased Output_Promises.Promise;
       end record;
-      overriding procedure Resolved (Self : in out Callback; P : T);
+      overriding procedure Resolved
+         (Self : in out Callback; P : Input_Promises.Result_Type);
    end Chains;
 
 end Promises;
