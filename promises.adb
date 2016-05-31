@@ -16,7 +16,7 @@ package body Promises is
 
       procedure When_Done
          (Self : in out Promise;
-          Cb   : not null access T_Callbacks.Callback'Class) is
+          Cb   : not null access Callback'Class) is
       begin
          --  ??? Unrestricted_Access is temporary, so that user can
          --  use "new Cb" directly in the call to When_Done.
@@ -31,7 +31,7 @@ package body Promises is
    
    package body Chains is
    
-      function Chain
+      function When_Done
          (Self : in out T_Promises.Promise;
           Cb   : not null access Callback'Class)
          return access T2_Promises.Promise
@@ -39,7 +39,7 @@ package body Promises is
       begin
          T_Promises.When_Done (Self, Cb.all'Unrestricted_Access);
          return Cb.Promise'Unrestricted_Access;  --  will be resolved later
-      end Chain;
+      end When_Done;
 
       overriding procedure Resolved (Self : in out Callback; P : T) is
       begin

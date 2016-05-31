@@ -29,18 +29,6 @@ with Ada.Containers.Vectors;
 
 package Promises is
 
-   ---------------
-   -- Callbacks --
-   ---------------
-
-   generic
-      type T (<>) is private;
-   package Callbacks is
-      type Callback is interface;
-      type Callback_Access is access all Callback'Class;
-      procedure Resolved (Self : in out Callback; R : T) is abstract;
-   end Callbacks;
-
    --------------
    -- Promises --
    --------------
@@ -54,21 +42,29 @@ package Promises is
       --  Give a result to the promise, and execute all registered
       --  callbacks.
    
-      package T_Callbacks is new Callbacks (T);
-      subtype Callback is T_Callbacks.Callback;
+      type Callback is interface;
+      type Callback_Access is access all Callback'Class;
+      procedure Resolved (Self : in out Callback; R : T) is abstract;
+      --  Executed when a promise is resolved. It provides the real value
+      --  associated with the promise.
 
       procedure When_Done
          (Self : in out Promise;
-          Cb   : not null access T_Callbacks.Callback'Class);
+          Cb   : not null access Callback'Class);
+      --  Will call Cb when Self is resolved.
+      --  Any number of callbacks can be set on each promise.
+      --  If you want to chain promises (i.e. your callback itself returns
+      --  a promise), take a look at the Chains package below.
    
    private
-      use type T_Callbacks.Callback_Access;
       package Cb_Vectors is new Ada.Containers.Vectors
-         (Positive, T_Callbacks.Callback_Access);
+         (Positive, Callback_Access);
 
       type Promise is tagged record
          Callbacks : Cb_Vectors.Vector;
-         --  Need a vector here, but should try to limit memory allocs
+         --  Need a vector here, but should try to limit memory allocs.
+         --  A bounded vector might be more efficient, and sufficient in
+         --  practice.
       end record;
    end Promises;
 
@@ -78,30 +74,28 @@ package Promises is
    
    generic
       type T (<>) is private;
-      type T2 (<>) is private;
       with package T_Promises is new Promises (T);
+
+      type T2 (<>) is private;
       with package T2_Promises is new Promises (T2);
    package Chains is
-      type Callback is abstract new T_Promises.T_Callbacks.Callback
+      type Callback is abstract new T_Promises.Callback
          with private;
       procedure Resolved
         (Self : in out Callback; P : T; Output : in out T2_Promises.Promise)
         is abstract;
       --  This is the procedure that needs overriding, not the one inherited
-      --  from T_Callbacks
+      --  from T_Promises. When chaining, a callback returns another promise,
+      --  to which the user can attach further callbacks, and so on.
 
-      --  must resolve Output eventually
-   
-      function Chain
+      function When_Done
          (Self : in out T_Promises.Promise;
           Cb   : not null access Callback'Class)
          return access T2_Promises.Promise;
-      --  Returns a new promise, which will also be passed to Cb, to
-      --  be resolved later
+      --  Returns a new promise, which will be resolved by Cb eventually.
 
    private
-      type Callback is abstract new T_Promises.T_Callbacks.Callback with
-      record
+      type Callback is abstract new T_Promises.Callback with record
          Promise : aliased T2_Promises.Promise;
       end record;
       overriding procedure Resolved (Self : in out Callback; P : T);

@@ -36,7 +36,7 @@ begin
       C : access Str_Promises.Promise;
    begin
       P := Get_Promise;
-      C := Int_To_Str.Chain (P, new Convert_Int);
+      C := Int_To_Str.When_Done (P, new Convert_Int);
       C.When_Done (new On_String);
 
       Put_Line ("Done setting up the promise chain");
