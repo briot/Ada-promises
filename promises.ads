@@ -65,6 +65,10 @@ package Promises is
       end record;
    end Promises;
 
+   ------------
+   -- Chains --
+   ------------
+
    generic
       with package Input_Promises is new Promises (<>);
       with package Output_Promises is new Promises (<>);
