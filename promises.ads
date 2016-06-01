@@ -170,6 +170,10 @@ package Promises is
       --  This is the procedure that needs overriding, not the one inherited
       --  from Input_Promises. When chaining, a callback returns another
       --  promise, to which the user can attach further callbacks, and so on.
+      --
+      --  Failures in a promise are by default propagated to the output
+      --  promise, unless you override the Failed primitive operation of
+      --  Self.
 
       function When_Done
          (Self : Input_Promises.Promise;
@@ -189,6 +193,7 @@ package Promises is
       end record;
       overriding procedure Resolved
          (Self : in out Callback; P : Input_Promises.Result_Type);
+      overriding procedure Failed (Self : in out Callback; Reason : String);
    end Chains;
 
 private

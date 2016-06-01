@@ -193,6 +193,17 @@ package body Promises is
          Resolved (Callback'Class (Self), P, Self.Promise);
       end Resolved;
 
+      ------------
+      -- Failed --
+      ------------
+
+      overriding procedure Failed
+         (Self : in out Callback; Reason : String) is
+      begin
+         --  Propagate the failure
+         Self.Promise.Fail (Reason);
+      end Failed;
+
       -----------
       -- "and" --
       -----------
