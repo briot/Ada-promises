@@ -26,6 +26,7 @@
 --  is called immediately, so the promise needs to store the callback.
 
 with Ada.Containers.Vectors;
+with GNATCOLL.Refcount;
 
 package Promises is
 
@@ -33,36 +34,58 @@ package Promises is
       type T (<>) is private;
    package Promises is
       type Promise is tagged private;
+      --  A promise is a smart pointer: it is a wrapper around shared
+      --  data that is freed when no more reference to the promise
+      --  exists.
+
       subtype Result_Type is T;
+
+      type Callback is interface;
+      type Callback_Access is access all Callback'Class;
+      procedure Resolved (Self : in out Callback; R : Result_Type) is abstract;
+      --  Executed when a promise is resolved. It provides the real value
+      --  associated with the promise.
+ 
+      function Create return Promise;
+      --  Create a new promise, with no associated value.
+
+      function Is_Created (Self : Promise) return Boolean with Inline;
+      --  Whether the promise has been created
    
-      procedure Resolve (Self : in out Promise; R : T);
+      procedure Resolve (Self : in out Promise; R : T)
+        with Pre => Self.Is_Created;
       --  Give a result to the promise, and execute all registered
       --  callbacks.
    
-      type Callback is interface;
-      type Callback_Access is access all Callback'Class;
-      procedure Resolved (Self : in out Callback; R : T) is abstract;
-      --  Executed when a promise is resolved. It provides the real value
-      --  associated with the promise.
-   
       procedure When_Done
-         (Self : in out Promise;
-          Cb   : not null access Callback'Class);
+        (Self : Promise;
+         Cb   : not null access Callback'Class)
+        with Pre => Self.Is_Created;
       --  Will call Cb when Self is resolved.
       --  Any number of callbacks can be set on each promise.
       --  If you want to chain promises (i.e. your callback itself returns
       --  a promise), take a look at the Chains package below.
+      --
+      --  Self is modified, but does not need to be "in out" since a promise
+      --  is a pointer. This means that When_Done can be directly called on
+      --  the result of a function call, for instance.
    
    private
       package Cb_Vectors is new Ada.Containers.Vectors
          (Positive, Callback_Access);
-   
-      type Promise is tagged record
+
+      type Promise_Data is record
          Callbacks : Cb_Vectors.Vector;
          --  Need a vector here, but should try to limit memory allocs.
          --  A bounded vector might be more efficient, and sufficient in
          --  practice.
       end record;
+
+      package Promise_Pointers is new GNATCOLL.Refcount.Shared_Pointers
+         (Element_Type           => Promise_Data,
+          Atomic_Counters        => True,   --  thread-safe
+          Potentially_Controlled => True);  --  a vector is controlled
+      type Promise is new Promise_Pointers.Ref with null record;
    end Promises;
 
    ------------
@@ -85,7 +108,7 @@ package Promises is
       --  promise, to which the user can attach further callbacks, and so on.
    
       function When_Done
-         (Self : in out Input_Promises.Promise;
+         (Self : Input_Promises.Promise;
           Cb   : not null access Callback'Class)
          return access Output_Promises.Promise;
       --  Returns a new promise, which will be resolved by Cb eventually.

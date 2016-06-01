@@ -6,16 +6,36 @@ package body Promises is
    
    package body Promises is
    
+      ------------
+      -- Create --
+      ------------
+
+      function Create return Promise is
+      begin
+         return P : Promise do
+            P.Set (Data => (Callbacks => Cb_Vectors.Empty_Vector));
+         end return;
+      end Create;
+
+      ----------------
+      -- Is_Created --
+      ----------------
+
+      function Is_Created (Self : Promise) return Boolean is
+      begin
+         return not Self.Is_Null;
+      end Is_Created;
+  
       -------------
       -- Resolve --
       -------------
 
       procedure Resolve (Self : in out Promise; R : T) is
       begin
-         for Cb of Self.Callbacks loop
+         for Cb of Self.Get.Callbacks loop
             Cb.Resolved (R);
          end loop;
-         Self.Callbacks.Clear;  --  Should also free memory
+         Self.Get.Callbacks.Clear;  --  Should also free memory
       end Resolve;
 
       ---------------
@@ -23,12 +43,12 @@ package body Promises is
       ---------------
 
       procedure When_Done
-         (Self : in out Promise;
+         (Self : Promise;
           Cb   : not null access Callback'Class) is
       begin
          --  ??? Unrestricted_Access is temporary, so that user can
          --  use "new Cb" directly in the call to When_Done.
-         Self.Callbacks.Append (Cb.all'Unrestricted_Access);
+         Self.Get.Callbacks.Append (Cb.all'Unrestricted_Access);
       end When_Done;
 
    end Promises;
@@ -44,12 +64,13 @@ package body Promises is
       ---------------
 
       function When_Done
-         (Self : in out Input_Promises.Promise;
+         (Self : Input_Promises.Promise;
           Cb   : not null access Callback'Class)
          return access Output_Promises.Promise is
       begin
+         Cb.Promise := Output_Promises.Create;
          Input_Promises.When_Done (Self, Cb.all'Unrestricted_Access);
-         return Cb.Promise'Unrestricted_Access;  --  will be resolved later
+         return Cb.Promise'Unrestricted_Access;
       end When_Done;
 
       --------------
