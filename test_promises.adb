@@ -1,10 +1,12 @@
 with GNAT.IO;   use GNAT.IO;
-with Promises;
 with Test_Promises_Support;   use Test_Promises_Support;
 
 procedure Test_Promises is
+   function Get_Promise return Int_Promises.Promise;
+   --  Dummy function
+
    function Get_Promise return Int_Promises.Promise is
-      P : Int_Promises.Promise := Int_Promises.Create;
+      P : constant Int_Promises.Promise := Int_Promises.Create;
    begin
       --  ??? Could resolve in a task for instance
       return P;
@@ -26,6 +28,8 @@ begin
        new Convert_Float)
       .When_Done (new Display_String);
 
+   --  Idea 1
+   --  ------
    --  If we use use-clauses, this helps a bit, although it hides some
    --  of the details
    --
@@ -45,6 +49,8 @@ begin
    --             new Convert_Float),
    --         new Display_String);
 
+   --  Idea 2
+   --  ------
    --  Ideally, we want something similar to the following.
    --  This is doable in C++ because a template still defines a method
    --  that can be called with '.' (although not virtual of course). In
@@ -54,6 +60,8 @@ begin
    --      .When_Done (new Convert_Float)
    --      .When_Done (new Display_String);
 
+   --  Idea 3
+   --  ------
    --  With casts, we could have a general When_Done primitive op that
    --  returns a Base_Promise'Class (an interface), which we cast to
    --  the appropriate type. But this requires run time checks, and if
@@ -63,6 +71,20 @@ begin
    --     Float_Promises.Promise (P.When_Done (new Convert_Int))
    --        .When_Done (new Convert_Float)
    --        .When_Done (new On_String);
+
+   --  Idea 4
+   --  ------
+   --  Can we redefine some operators ("and" for instance) to get a nice
+   --  syntax:
+   declare
+      use Int_To_Float, Float_To_Str, Str_Promises;
+      Dummy : constant Promise_Chain :=
+         P and new Convert_Int
+           and new Convert_Float
+           and new Display_String;
+   begin
+      null;
+   end;
 
    Put_Line ("Done setting up the promise chain");
 

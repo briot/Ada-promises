@@ -2,4 +2,11 @@ with "gnatcoll";
 project Default is
    for Object_Dir use "obj";
    for Main use ("test_promises.adb");
+
+   package Compiler is
+      for Switches ("Ada") use
+         ("-g", "-gnat12", "-gnatwaCJe", "-gnata", "-gnatVa",
+          "-gnatQ", "-gnatygO", "-gnateE");
+   end Compiler;
+                    
 end Default;

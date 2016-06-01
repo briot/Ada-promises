@@ -34,7 +34,7 @@ package Promises is
       --------------
       -- Promises --
       --------------
- 
+
       function Create return Promise
         with
           Post => Create'Result.Is_Created
@@ -47,7 +47,7 @@ package Promises is
       type Promise_State is (Pending, Resolved, Failed);
       function Get_State (Self : Promise) return Promise_State with Inline;
       --  Return the state of the promise
-   
+
       procedure Resolve (Self : in out Promise; R : T)
         with
           Pre => Self.Is_Created and Self.Get_State = Pending,
@@ -55,7 +55,7 @@ package Promises is
       --  Give a result to the promise.
       --  The callbacks' Resolved method is executed.
       --  This can only be called once on a promise.
-   
+
       procedure Fail (Self : in out Promise; Reason : String)
         with
           Pre => Self.Is_Created and Self.Get_State = Pending,
@@ -81,12 +81,26 @@ package Promises is
       --  Self is modified, but does not need to be "in out" since a promise
       --  is a pointer. This means that When_Done can be directly called on
       --  the result of a function call, for instance.
-   
+
+      procedure When_Done
+        (Self     : Promise;
+         Resolved : access procedure (R : T) := null;
+         Failed   : access procedure (Reason : String) := null);
+      --  A variant of When_Done that manipulate access to subprograms.
+
+      type Promise_Chain is private;
+      function "and"
+         (Self  : Promise;
+          Cb    : not null access Callback'Class)
+         return Promise_Chain;
+      --  ??? Tentative operator to improve When_Done syntax
+
    private
       package Cb_Vectors is new Ada.Containers.Vectors
          (Positive, Callback_Access);
 
       type T_Access is access all T;
+      type Promise_Chain is null record;
 
       type Promise_Data (State : Promise_State := Pending) is record
          case State is
@@ -133,13 +147,19 @@ package Promises is
       --  This is the procedure that needs overriding, not the one inherited
       --  from Input_Promises. When chaining, a callback returns another
       --  promise, to which the user can attach further callbacks, and so on.
-   
+
       function When_Done
          (Self : Input_Promises.Promise;
           Cb   : not null access Callback'Class)
          return Output_Promises.Promise;
       --  Returns a new promise, which will be resolved by Cb eventually.
-   
+
+      function "and"
+         (Self  : Input_Promises.Promise;
+          Cb    : not null access Callback'Class)
+         return Output_Promises.Promise;
+      --  ??? Tentative syntax to improve When_Done syntax
+
    private
       type Callback is abstract new Input_Promises.Callback with record
          Promise : aliased Output_Promises.Promise;

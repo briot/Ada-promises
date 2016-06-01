@@ -6,14 +6,14 @@ package body Promises is
    --------------
    -- Promises --
    --------------
-   
+
    package body Promises is
 
       procedure Unchecked_Free is new Ada.Unchecked_Deallocation
          (Callback'Class, Callback_Access);
       procedure Unchecked_Free is new Ada.Unchecked_Deallocation
          (T, T_Access);
-   
+
       ------------
       -- Create --
       ------------
@@ -63,7 +63,7 @@ package body Promises is
                Free (Self.Reason);
          end case;
       end Free;
-  
+
       -------------
       -- Resolve --
       -------------
@@ -135,14 +135,40 @@ package body Promises is
          end case;
       end When_Done;
 
+      ---------------
+      -- When_Done --
+      ---------------
+
+      procedure When_Done
+        (Self     : Promise;
+         Resolved : access procedure (R : T) := null;
+         Failed   : access procedure (Reason : String) := null)
+      is
+      begin
+         raise Program_Error with "not implemented yet";
+      end When_Done;
+
+      -----------
+      -- "and" --
+      -----------
+
+      function "and"
+         (Self  : Promise;
+          Cb    : not null access Callback'Class)
+         return Promise_Chain is
+      begin
+         Self.When_Done (Cb);
+         return Promise_Chain'(null record);
+      end "and";
+
    end Promises;
 
    ------------
    -- Chains --
    ------------
-   
+
    package body Chains is
-   
+
       ---------------
       -- When_Done --
       ---------------
@@ -166,6 +192,18 @@ package body Promises is
       begin
          Resolved (Callback'Class (Self), P, Self.Promise);
       end Resolved;
+
+      -----------
+      -- "and" --
+      -----------
+
+      function "and"
+         (Self  : Input_Promises.Promise;
+          Cb    : not null access Callback'Class)
+         return Output_Promises.Promise is
+      begin
+         return When_Done (Self, Cb);
+      end "and";
 
    end Chains;
 
