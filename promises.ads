@@ -110,7 +110,7 @@ package Promises is
       function When_Done
          (Self : Input_Promises.Promise;
           Cb   : not null access Callback'Class)
-         return access Output_Promises.Promise;
+         return Output_Promises.Promise;
       --  Returns a new promise, which will be resolved by Cb eventually.
    
    private

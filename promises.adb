@@ -66,11 +66,11 @@ package body Promises is
       function When_Done
          (Self : Input_Promises.Promise;
           Cb   : not null access Callback'Class)
-         return access Output_Promises.Promise is
+         return Output_Promises.Promise is
       begin
          Cb.Promise := Output_Promises.Create;
          Input_Promises.When_Done (Self, Cb.all'Unrestricted_Access);
-         return Cb.Promise'Unrestricted_Access;
+         return Cb.Promise;
       end When_Done;
 
       --------------
