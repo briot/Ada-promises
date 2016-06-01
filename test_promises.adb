@@ -1,7 +1,10 @@
 with GNAT.IO;   use GNAT.IO;
+with Promises;  use Promises;
 with Test_Promises_Support;   use Test_Promises_Support;
 
 procedure Test_Promises is
+   use Int_To_Float, Float_To_Str, Str_Promises;
+
    function Get_Promise return Int_Promises.Promise;
    --  Dummy function
 
@@ -76,15 +79,10 @@ begin
    --  ------
    --  Can we redefine some operators ("and" for instance) to get a nice
    --  syntax:
-   declare
-      use Int_To_Float, Float_To_Str, Str_Promises;
-      Dummy : constant Promise_Chain :=
-         P and new Convert_Int
-           and new Convert_Float
-           and new Display_String;
-   begin
-      null;
-   end;
+
+   Ignore (P and new Convert_Int
+             and new Convert_Float
+             and new Display_String);
 
    Put_Line ("Done setting up the promise chain");
 

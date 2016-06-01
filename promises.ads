@@ -4,6 +4,11 @@ with GNAT.Strings;
 
 package Promises is
 
+   type Promise_Chain is tagged private;
+   procedure Ignore (Self : Promise_Chain) is null;
+   --  A dummy type used when chaining promises with the "and"
+   --  operator. See below for an example of code.
+
    generic
       type T (<>) is private;
    package Promises is
@@ -88,19 +93,37 @@ package Promises is
          Failed   : access procedure (Reason : String) := null);
       --  A variant of When_Done that manipulate access to subprograms.
 
-      type Promise_Chain is private;
+      ------------------------
+      -- Chainging promises --
+      ------------------------
+      --  The following is a helper to write chains of promises in a more
+      --  user-friendly fashion. Rather than using When_Done (or the
+      --  version provides in the Chains package below), which requires
+      --  a bit of an inversion in the order, as in:
+      --
+      --       Float_To_Str.When_Done
+      --          (Int_To_Float.When_Done (P, new ...),
+      --           new ...)
+      --          .When_Done (...)
+      --
+      --  we can use the simpler:
+      --
+      --       use Float_To_Str, Int_To_Float;
+      --       (P and new ... and new ...).Ignore;
+      --
+      --  with the exact order in which the callbacks will be executed.
+
       function "and"
          (Self  : Promise;
           Cb    : not null access Callback'Class)
          return Promise_Chain;
-      --  ??? Tentative operator to improve When_Done syntax
+      --  Same as When_Done, easier to chain
 
    private
       package Cb_Vectors is new Ada.Containers.Vectors
          (Positive, Callback_Access);
 
       type T_Access is access all T;
-      type Promise_Chain is null record;
 
       type Promise_Data (State : Promise_State := Pending) is record
          case State is
@@ -168,4 +191,6 @@ package Promises is
          (Self : in out Callback; P : Input_Promises.Result_Type);
    end Chains;
 
+private
+   type Promise_Chain is tagged null record;
 end Promises;
