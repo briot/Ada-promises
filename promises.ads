@@ -1,32 +1,6 @@
---   Ideally, we want to chain promises:
---       Get_Promise_T
---       .When_Done (Do_Something)   --  receives a T argument
---       .When_Done (Do_Else)        --  receives result of Do_Something
---       .Ignore;                    --  don't care about the last
---
---       function Get_Promise_T return Promise<T>;
---       procedure Do_Something (P : T; O : in out Promise<T2>);
---       procedure Do_Else (P : T2; O : in out Promise<*>);
---
---  But when we instantiate Promise<T>, for instance, we should not have
---  to know that it will be chained with a function that manipulates T2
---  (although when we instantiate Do_Something we know both T and T2).
---
---  Multiple callbacks can be set on a promise. Each callback can return
---  a different type.
---
---      procedure Do_Something2 (P : T; O : in out Promise<T3>);
---      P : Promise<T> := Get_Promise_T;
---      P.When_Done (Do_Something);
---      P.When_Done (Do_Something2);
---
---  A promise is only resolved once, so as soon as the callbacks have
---  executed, they can be freed (if necessary). However, it is possible to
---  set a callback on an already resolved promise later on (and the callback
---  is called immediately, so the promise needs to store the callback.
-
 with Ada.Containers.Vectors;
 with GNATCOLL.Refcount;
+with GNAT.Strings;
 
 package Promises is
 
@@ -40,31 +14,69 @@ package Promises is
 
       subtype Result_Type is T;
 
+      ---------------
+      -- Callbacks --
+      ---------------
+
       type Callback is interface;
       type Callback_Access is access all Callback'Class;
-      procedure Resolved (Self : in out Callback; R : Result_Type) is abstract;
+
+      procedure Resolved (Self : in out Callback; R : Result_Type) is null;
       --  Executed when a promise is resolved. It provides the real value
       --  associated with the promise.
+
+      procedure Failed (Self : in out Callback; Reason : String) is null;
+      --  Called when a promise has failed and will never be resolved.
+
+      procedure Free (Self : in out Callback) is null;
+      --  Free the memory associated with Callback
+
+      --------------
+      -- Promises --
+      --------------
  
-      function Create return Promise;
+      function Create return Promise
+        with
+          Post => Create'Result.Is_Created
+             and Create'Result.Get_State = Pending;
       --  Create a new promise, with no associated value.
 
       function Is_Created (Self : Promise) return Boolean with Inline;
       --  Whether the promise has been created
+
+      type Promise_State is (Pending, Resolved, Failed);
+      function Get_State (Self : Promise) return Promise_State with Inline;
+      --  Return the state of the promise
    
       procedure Resolve (Self : in out Promise; R : T)
-        with Pre => Self.Is_Created;
-      --  Give a result to the promise, and execute all registered
-      --  callbacks.
+        with
+          Pre => Self.Is_Created and Self.Get_State = Pending,
+          Post => Self.Get_State = Resolved;
+      --  Give a result to the promise.
+      --  The callbacks' Resolved method is executed.
+      --  This can only be called once on a promise.
    
+      procedure Fail (Self : in out Promise; Reason : String)
+        with
+          Pre => Self.Is_Created and Self.Get_State = Pending,
+          Post => Self.Get_State = Failed;
+      --  Mark the promise has failed. It will never be resolved.
+      --  The callbacks' Failed method is executed.
+
       procedure When_Done
         (Self : Promise;
          Cb   : not null access Callback'Class)
         with Pre => Self.Is_Created;
-      --  Will call Cb when Self is resolved.
+      --  Will call Cb when Self is resolved or failed (or immediately if Self
+      --  has already been resolved or failed).
       --  Any number of callbacks can be set on each promise.
       --  If you want to chain promises (i.e. your callback itself returns
       --  a promise), take a look at the Chains package below.
+      --
+      --  Cb must be allocated specifically for this call, and will be
+      --  freed as needed. You must not reuse the same pointer for multiple
+      --  calls to When_Done.
+      --  ??? This is unsafe
       --
       --  Self is modified, but does not need to be "in out" since a promise
       --  is a pointer. This means that When_Done can be directly called on
@@ -74,15 +86,30 @@ package Promises is
       package Cb_Vectors is new Ada.Containers.Vectors
          (Positive, Callback_Access);
 
-      type Promise_Data is record
-         Callbacks : Cb_Vectors.Vector;
-         --  Need a vector here, but should try to limit memory allocs.
-         --  A bounded vector might be more efficient, and sufficient in
-         --  practice.
+      type T_Access is access all T;
+
+      type Promise_Data (State : Promise_State := Pending) is record
+         case State is
+            when Pending =>
+               Callbacks : Cb_Vectors.Vector;
+               --  Need a vector here, but should try to limit memory allocs.
+               --  A bounded vector might be more efficient, and sufficient in
+               --  practice.
+
+            when Resolved =>
+               Value     : T_Access;
+               --  ??? Using the ada-traits-containers approach, we could avoid
+               --  some memory allocation here.
+
+            when Failed =>
+               Reason    : GNAT.Strings.String_Access;
+         end case;
       end record;
+      procedure Free (Self : in out Promise_Data);
 
       package Promise_Pointers is new GNATCOLL.Refcount.Shared_Pointers
          (Element_Type           => Promise_Data,
+          Release                => Free,
           Atomic_Counters        => True,   --  thread-safe
           Potentially_Controlled => True);  --  a vector is controlled
       type Promise is new Promise_Pointers.Ref with null record;
