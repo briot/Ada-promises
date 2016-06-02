@@ -63,14 +63,14 @@ package body Promises is
       end if;
    end Free;
 
-   ------------
-   -- Ignore --
-   ------------
+   -----------
+   -- Start --
+   -----------
 
-   procedure Ignore (Self : Promise_Chain) is
+   procedure Start (Self : Promise_Chain) is
    begin
       null;
-   end Ignore;
+   end Start;
 
    --------------
    -- Promises --

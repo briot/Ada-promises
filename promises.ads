@@ -52,7 +52,7 @@
 --
 --       P : Str_Promises.Promise;
 --
---       Ignore
+--       Start
 --          (Fetch_URL_Asynchronously ("http://...")
 --           and new Count_Elements
 --           and> new Report_Count);
@@ -109,7 +109,7 @@
 --           new B)
 --          .When_Done (new C)
 --
---       Ignore (P and new A and new B and new C;
+--       Start (P and new A and new B and new C;
 --
 --  From now on, we will only use the second syntax.
 --
@@ -136,8 +136,8 @@
 --  Q: What if I want multiple callbacks on the same promise ?
 --  A: You need to use intermediate variables, as in:
 --       Q := P and new A;
---       Ignore (Q and new B);
---       Ignore (Q and new C);
+--       Start (Q and new B);
+--       Start (Q and new C);
 --     Where both B and C are callbacks on A's return promise (and not
 --     chained together).
 --
@@ -174,7 +174,7 @@ package Promises is
    --  The various states that a promise can have
 
    type Promise_Chain is tagged private;
-   procedure Ignore (Self : Promise_Chain) with Inline => True;
+   procedure Start (Self : Promise_Chain) with Inline => True;
    --  A dummy type used when chaining promises with the "and"
    --  operator. See below for an example of code.
    --

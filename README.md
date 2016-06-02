@@ -125,3 +125,12 @@ Various improvement ideas for this library:
      Also, we should have a way of preventing the reuse of the same access
      for multiple callbacks (`Chains` already does this via its
      `Is_Registered` function, but this is not the case for `Promises`)
+
+     One way to limit this is by taking subprogram access instead of
+     tagged types. The latter are still useful when additional data needs
+     to be passed though (simulates lamda functions for instance).
+
+   - Add more use cases
+     Show how to use tasks along with promises.
+        (Should actually make promises task safe first)
+     Show how to use promises in a gtk+ context
