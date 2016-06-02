@@ -24,5 +24,8 @@ package Test_Promises_Support is
    overriding procedure Resolved
       (Self   : in out Display_String;
        P      : String);
+   overriding procedure Failed
+      (Self   : in out Display_String;
+       Reason : String);
 
 end Test_Promises_Support;

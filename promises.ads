@@ -5,9 +5,12 @@ with GNAT.Strings;
 package Promises is
 
    type Promise_Chain is tagged private;
-   procedure Ignore (Self : Promise_Chain) is null;
+   procedure Ignore (Self : Promise_Chain) with Inline => True;
    --  A dummy type used when chaining promises with the "and"
    --  operator. See below for an example of code.
+   --
+   --  Do not mark this procedure as "is null", since otherwise GNAT
+   --  does not even call the last "and" in the chain.
 
    generic
       type T (<>) is private;

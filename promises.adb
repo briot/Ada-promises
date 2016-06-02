@@ -1,7 +1,17 @@
+with Ada.Exceptions;     use Ada.Exceptions;
 with Ada.Unchecked_Deallocation;
-with GNAT.Strings;   use GNAT.Strings;
+with GNAT.Strings;       use GNAT.Strings;
 
 package body Promises is
+
+   ------------
+   -- Ignore --
+   ------------
+
+   procedure Ignore (Self : Promise_Chain) is
+   begin
+      null;
+   end Ignore;
 
    --------------
    -- Promises --
@@ -113,7 +123,7 @@ package body Promises is
       ---------------
 
       procedure When_Done
-        (Self : Promise; Cb   : not null access Callback'Class)
+        (Self : Promise; Cb : not null access Callback'Class)
       is
          --  ??? Unrestricted_Access is temporary, so that user can
          --  use "new Cb" directly in the call to When_Done.
@@ -191,6 +201,9 @@ package body Promises is
          (Self : in out Callback; P : Input_Promises.Result_Type) is
       begin
          Resolved (Callback'Class (Self), P, Self.Promise);
+      exception
+         when E : others =>
+            Self.Promise.Fail (Exception_Message (E));
       end Resolved;
 
       ------------

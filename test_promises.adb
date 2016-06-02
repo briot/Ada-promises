@@ -18,18 +18,15 @@ procedure Test_Promises is
    P : Int_Promises.Promise;
 
 begin
-   Put_Line ("Setting up the promise chain");
-   P := Get_Promise;
-
    --  Current syntax is not so good: although the various
    --  callbacks are listed in the order they will be executed, we
    --  still need to mention packages like Float_To_Str before
    --  earlier packages in the chain, like Int_To_Float.
 
-   Float_To_Str.When_Done
-      (Int_To_Float.When_Done (P, new Convert_Int),
-       new Convert_Float)
-      .When_Done (new Display_String);
+   --    Float_To_Str.When_Done
+   --       (Int_To_Float.When_Done (P, new Convert_Int),
+   --        new Convert_Float)
+   --       .When_Done (new Display_String);
 
    --  Idea 1
    --  ------
@@ -80,13 +77,21 @@ begin
    --  Can we redefine some operators ("and" for instance) to get a nice
    --  syntax:
 
+   Put_Line ("Create chain");
+   P := Get_Promise;
    Ignore (P and new Convert_Int
              and new Convert_Float
              and new Display_String);
 
-   Put_Line ("Done setting up the promise chain");
-
+   Put_Line ("Resolving...");
    P.Resolve (2);
-   Put_Line ("Done resolving P");
+
+   Put_Line ("Create chain");
+   P := Get_Promise;
+   Ignore (P and new Convert_Int
+             and new Convert_Float
+             and new Display_String);
+   Put_Line ("Failing...");
+   P.Fail ("Explicit failure");
 
 end Test_Promises;
