@@ -1,3 +1,120 @@
+--   A promise (also none sometimes as a future or deferred) is a
+--   a synchronization mechanism between asynchronous routines.
+--
+--   Such routines could be implemented as tasks, but also be handled
+--   via the system's asynchronous I/O primitives, or an event loop in a
+--   GUI program for instance.
+--
+--   A promise is a value that such a routine can return immediately to the
+--   caller, before it even starts its processing or the actual value is
+--   available. The caller can then subscribe to the promise, so that when
+--   the value becomes actually known, it gets notified and a callback is
+--   executed.
+--
+--   Here is a simple example:
+--
+--       package Str_Promises is new Promises (String);
+--
+--       type Process_Page is new Str_Promises.Callback with null record;
+--       overriding procedure Resolved
+--          (Self : in out Process_Page; Page : String)
+--       is
+--       begin
+--          Put_Line ("Page contents is known: " & Page);
+--       end Resolved;
+--
+--       P : Str_Promises.Promise;
+--
+--       P := Fetch_URL_Asynchronously ("http://...");
+--       P.When_Done (new Process_Page);
+--
+--   Where Fetch_URL_Asynchronously could run in a task, connect to a
+--   web server and query a document.
+--
+--   But promises are more interesting when they are chained, i.e. the
+--   action executed when the first promise is resolved will itself
+--   return a promise. Here is an example:
+--
+--       package Str_Promises is new Promises (String);
+--       package Int_Promises is new Promises (Integer);
+--       package Str_To_Int is new Chains (Str_Promises, Int_Promises);
+--
+--       type Count_Elements is new Str_Promises.Callback with null record;
+--       overriding procedure Resolved
+--          (Self : in out Process_Page; Page : String);
+--       --  For instance, count the number of elements in the XML
+--
+--       type Report_Count is new Int_Promises.Callback with null record;
+--       overriding procedure Resolved
+--          (Self : in out Report_Count; Count : Integer);
+--       --  For instance display the number of elements in a GUI
+--
+--       P : Str_Promises.Promise;
+--
+--       Ignore
+--          (Fetch_URL_Asynchronously ("http://...")
+--           and new Count_Elements
+--           and new Report_Count);
+--
+--   The code above returns immediately, even though the URL will be fetched
+--   in the background (which could take a few seconds), then parsed to count
+--   the number of elements (which could be done in a separate task and take
+--   a few milliseconds), and finally this count will be displayed in a GUI.
+--
+--   The advantage of this code is that it is composed of small, independent
+--   building blocks that are executed when data becomes available. The caller
+--   does not have to take care of the synchronization, since the promises
+--   handle that.
+--
+--   Behavior
+--   ========
+--
+--   There are some standard behaviors associated with promises, which this
+--   package tries to conform with:
+--
+--   * A promise is in one of three states:
+--     - Pending: the promise has no associated value yet. Some subprogram is
+--                still running to fetch that value.
+--     - Resolved: the routine has successfully finished running, and given
+--                an actual value to the promise.
+--     - Failed: the routine failed, and no value will ever be provided to the
+--                routine.
+--
+--   * Any number of callbacks can be set on a routine. They will all be
+--     executed once when the promise is resolved or failed. They are never
+--     executed afterwards.
+--
+--   * A promise can be resolved at any time. Whenever it is resolved, all
+--     callbacks currently set on the promise are executed and then
+--     disconnected. It is an error to resolve a promise more than once.
+--
+--   * A callback can be added to a promise at any time. If the promise has
+--     already been resolved, the callback is executed immediately with the
+--     value set on that promise.
+--
+--  Chaining and callbacks
+--  ======================
+--
+--  Promises can be chained, so that the callback for the first promise will
+--  itself return a promise, whose callback might in turn return a promise,
+--  and so on.
+--
+--  Let's take the following chain:
+--
+--      P and new A     --  A is the callback on P
+--        and new B     --  B is the callback on the promise returned by A
+--        and new C;    --  C is the callback on the promise returned by C
+--
+--  The following callbacks might occur:
+--
+--       promises                                    calls
+--  If P is resolved:                         A.Resolved
+--     If A's promise is resolved:              B.Resolved
+--        if B's promise is resolved:             C.Resolved
+--        else B's promise is failed:             C.Failed
+--     else A's promise is failed:              B.Failed and C.Failed
+--  else P failed:                            A.Failed, B.Failed and C.Failed
+
 with Ada.Containers.Vectors;
 with GNATCOLL.Refcount;
 with GNAT.Strings;
