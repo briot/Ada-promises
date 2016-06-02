@@ -38,6 +38,7 @@
 --       package Str_Promises is new Promises (String);
 --       package Int_Promises is new Promises (Integer);
 --       package Str_To_Int is new Chains (Str_Promises, Int_Promises);
+--       use Str_To_Int, Int_Promises;
 --
 --       type Count_Elements is new Str_Promises.Callback with null record;
 --       overriding procedure Resolved
@@ -99,6 +100,19 @@
 --  itself return a promise, whose callback might in turn return a promise,
 --  and so on.
 --
+--  Several equivalent syntaxes are available. One uses function calls,
+--  and the other uses overloaded operators which perhaps leads to code
+--  easier to read. The following two examples are equivalent:
+--
+--       Float_To_Str.When_Done
+--          (Int_To_Float.When_Done (P, new A),
+--           new B)
+--          .When_Done (new C)
+--
+--       Ignore (P and new A and new B and new C;
+--
+--  From now on, we will only use the second syntax.
+--
 --  Let's take the following chain:
 --
 --      P and new A     --  A is the callback on P
@@ -147,11 +161,12 @@
 --                                  C.Failed (A.R), D.Failed (A.R),
 --                                  E.Failed (C.R)
 
-with Ada.Containers.Vectors;
 with GNATCOLL.Refcount;
-with GNAT.Strings;
 
 package Promises is
+
+   type Promise_State is (Pending, Resolved, Failed);
+   --  The various states that a promise can have
 
    type Promise_Chain is tagged private;
    procedure Ignore (Self : Promise_Chain) with Inline => True;
@@ -161,10 +176,65 @@ package Promises is
    --  Do not mark this procedure as "is null", since otherwise GNAT
    --  does not even call the last "and" in the chain.
 
+   ----------
+   -- Impl --
+   ----------
+   --  This package is for implementation details
+
+   package Impl is
+
+      type Abstract_Promise_Data
+         (State : Promise_State) is abstract tagged null record;
+      type Abstract_Promise_Data_Access
+         is access all Abstract_Promise_Data'Class;
+      procedure Free (Self : in out Abstract_Promise_Data) is null;
+      procedure Dispatch_Free (Self : in out Abstract_Promise_Data'Class);
+
+      type Abstract_Promise is interface;
+
+      package Promise_Pointers is new GNATCOLL.Refcount.Shared_Pointers
+         (Element_Type           => Abstract_Promise_Data'Class,
+          Release                => Dispatch_Free,
+          Atomic_Counters        => True,   --  thread-safe
+          Potentially_Controlled => True);  --  a vector is controlled
+      type Root_Promise is
+         new Promise_Pointers.Ref and Abstract_Promise with null record;
+
+      function Is_Created (Self : Root_Promise'Class) return Boolean
+        with Inline;
+      --  Whether the promise has been created
+
+      function Get_State (Self : Root_Promise'Class) return Promise_State
+        with
+          Inline,
+          Pre => Self.Is_Created;
+      --  Return the state of the promise
+
+      ---------------
+      -- Callbacks --
+      ---------------
+
+      type Promise_Callback is interface;
+      type Promise_Callback_Access is access all Promise_Callback'Class;
+
+      procedure Failed
+         (Self : in out Promise_Callback; Reason : String) is null;
+      --  Called when a promise has failed and will never be resolved.
+
+      procedure Free (Self : in out Promise_Callback) is null;
+      --  Free the memory associated with Callback
+
+   end Impl;
+
+   --------------
+   -- Promises --
+   --------------
+
    generic
       type T (<>) is private;
    package Promises is
-      type Promise is tagged private;
+
+      type Promise is new Impl.Abstract_Promise with private;
       --  A promise is a smart pointer: it is a wrapper around shared
       --  data that is freed when no more reference to the promise
       --  exists.
@@ -175,18 +245,11 @@ package Promises is
       -- Callbacks --
       ---------------
 
-      type Callback is interface;
-      type Callback_Access is access all Callback'Class;
+      type Callback is interface and Impl.Promise_Callback;
 
       procedure Resolved (Self : in out Callback; R : Result_Type) is null;
       --  Executed when a promise is resolved. It provides the real value
       --  associated with the promise.
-
-      procedure Failed (Self : in out Callback; Reason : String) is null;
-      --  Called when a promise has failed and will never be resolved.
-
-      procedure Free (Self : in out Callback) is null;
-      --  Free the memory associated with Callback
 
       --------------
       -- Promises --
@@ -197,13 +260,6 @@ package Promises is
           Post => Create'Result.Is_Created
              and Create'Result.Get_State = Pending;
       --  Create a new promise, with no associated value.
-
-      function Is_Created (Self : Promise) return Boolean with Inline;
-      --  Whether the promise has been created
-
-      type Promise_State is (Pending, Resolved, Failed);
-      function Get_State (Self : Promise) return Promise_State with Inline;
-      --  Return the state of the promise
 
       procedure Resolve (Self : in out Promise; R : T)
         with
@@ -224,6 +280,11 @@ package Promises is
         (Self : Promise;
          Cb   : not null access Callback'Class)
         with Pre => Self.Is_Created;
+      function "and"
+        (Self  : Promise;
+         Cb    : not null access Callback'Class)
+        return Promise_Chain
+        with Pre => Self.Is_Created;
       --  Will call Cb when Self is resolved or failed (or immediately if Self
       --  has already been resolved or failed).
       --  Any number of callbacks can be set on each promise.
@@ -239,69 +300,18 @@ package Promises is
       --  is a pointer. This means that When_Done can be directly called on
       --  the result of a function call, for instance.
 
-      procedure When_Done
-        (Self     : Promise;
-         Resolved : access procedure (R : T) := null;
-         Failed   : access procedure (Reason : String) := null);
-      --  A variant of When_Done that manipulate access to subprograms.
-
-      ------------------------
-      -- Chainging promises --
-      ------------------------
-      --  The following is a helper to write chains of promises in a more
-      --  user-friendly fashion. Rather than using When_Done (or the
-      --  version provides in the Chains package below), which requires
-      --  a bit of an inversion in the order, as in:
-      --
-      --       Float_To_Str.When_Done
-      --          (Int_To_Float.When_Done (P, new ...),
-      --           new ...)
-      --          .When_Done (...)
-      --
-      --  we can use the simpler:
-      --
-      --       use Float_To_Str, Int_To_Float;
-      --       (P and new ... and new ...).Ignore;
-      --
-      --  with the exact order in which the callbacks will be executed.
-
-      function "and"
-         (Self  : Promise;
-          Cb    : not null access Callback'Class)
-         return Promise_Chain;
-      --  Same as When_Done, easier to chain
+      function Is_Created
+         (Self : Promise'Class) return Boolean with Inline_Always;
+      function Get_State
+         (Self : Promise'Class) return Promise_State with Inline_Always;
 
    private
-      package Cb_Vectors is new Ada.Containers.Vectors
-         (Positive, Callback_Access);
+      type Promise is new Impl.Root_Promise with null record;
 
-      type T_Access is access all T;
-
-      type Promise_Data (State : Promise_State := Pending) is record
-         case State is
-            when Pending =>
-               Callbacks : Cb_Vectors.Vector;
-               --  Need a vector here, but should try to limit memory allocs.
-               --  A bounded vector might be more efficient, and sufficient in
-               --  practice.
-
-            when Resolved =>
-               Value     : T_Access;
-               --  ??? Using the ada-traits-containers approach, we could avoid
-               --  some memory allocation here.
-
-            when Failed =>
-               Reason    : GNAT.Strings.String_Access;
-         end case;
-      end record;
-      procedure Free (Self : in out Promise_Data);
-
-      package Promise_Pointers is new GNATCOLL.Refcount.Shared_Pointers
-         (Element_Type           => Promise_Data,
-          Release                => Free,
-          Atomic_Counters        => True,   --  thread-safe
-          Potentially_Controlled => True);  --  a vector is controlled
-      type Promise is new Promise_Pointers.Ref with null record;
+      function Is_Created (Self : Promise'Class) return Boolean
+        is (Impl.Is_Created (Self));
+      function Get_State (Self : Promise'Class) return Promise_State
+        is (Impl.Get_State (Self));
    end Promises;
 
    ------------
@@ -312,13 +322,15 @@ package Promises is
       with package Input_Promises is new Promises (<>);
       with package Output_Promises is new Promises (<>);
    package Chains is
+
       type Callback is abstract new Input_Promises.Callback
          with private;
       procedure Resolved
         (Self   : in out Callback;
          Input  : Input_Promises.Result_Type;
          Output : in out Output_Promises.Promise)
-        is abstract;
+        is abstract
+        with Post'Class => Output.Get_State /= Pending;
       --  This is the procedure that needs overriding, not the one inherited
       --  from Input_Promises. When chaining, a callback returns another
       --  promise, to which the user can attach further callbacks, and so on.
@@ -327,17 +339,31 @@ package Promises is
       --  promise, unless you override the Failed primitive operation of
       --  Self.
 
-      function When_Done
-         (Self : Input_Promises.Promise;
-          Cb   : not null access Callback'Class)
-         return Output_Promises.Promise;
-      --  Returns a new promise, which will be resolved by Cb eventually.
+      function Is_Registered
+        (Self : not null access Callback'Class) return Boolean
+        with Inline;
+      --  Whether the callback has already been set on a promise. It is
+      --  invalid to use the same callback on multiple promises (or even
+      --  multiple times on the same promise).
 
+      function When_Done
+        (Input : Input_Promises.Promise;
+         Cb    : not null access Callback'Class)
+        return Output_Promises.Promise
+        with
+          Pre  => not Is_Registered (Cb),
+          Post => Is_Registered (Cb)
+             and When_Done'Result.Is_Created;
       function "and"
-         (Self  : Input_Promises.Promise;
-          Cb    : not null access Callback'Class)
-         return Output_Promises.Promise;
-      --  ??? Tentative syntax to improve When_Done syntax
+        (Input : Input_Promises.Promise;
+         Cb    : not null access Callback'Class)
+        return Output_Promises.Promise
+        renames When_Done;
+      --  Chains two properties.
+      --  When Input is resolved, Cb is executed and will in turn resolve
+      --  the output promise
+      --  These functions return immediately a promise that will be resolved
+      --  later.
 
    private
       type Callback is abstract new Input_Promises.Callback with record

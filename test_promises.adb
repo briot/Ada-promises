@@ -77,7 +77,7 @@ begin
    --  Can we redefine some operators ("and" for instance) to get a nice
    --  syntax:
 
-   Put_Line ("Create chain");
+   Put_Line ("=== Create chain");
    P := Get_Promise;
    Ignore (P and new Convert_Int
              and new Convert_Float
@@ -86,7 +86,7 @@ begin
    Put_Line ("Resolving...");
    P.Resolve (2);
 
-   Put_Line ("Create chain");
+   Put_Line ("=== Create chain");
    P := Get_Promise;
    Ignore (P and new Convert_Int
              and new Convert_Float

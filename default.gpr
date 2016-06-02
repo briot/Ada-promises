@@ -8,5 +8,9 @@ project Default is
          ("-g", "-gnat12", "-gnatwaCJe", "-gnata", "-gnatVa",
           "-gnatQ", "-gnatygO", "-gnateE");
    end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-E");
+   end Binder;
                     
 end Default;

@@ -1,8 +1,67 @@
+with Ada.Containers.Vectors;
 with Ada.Exceptions;     use Ada.Exceptions;
 with Ada.Unchecked_Deallocation;
 with GNAT.Strings;       use GNAT.Strings;
 
 package body Promises is
+
+   procedure Unchecked_Free is new Ada.Unchecked_Deallocation
+      (Impl.Promise_Callback'Class, Impl.Promise_Callback_Access);
+
+   procedure Free (Cb : in out Impl.Promise_Callback_Access);
+   --  Free the memory associated with Cb
+
+   package Cb_Vectors is new Ada.Containers.Vectors
+      (Positive, Impl.Promise_Callback_Access, Impl."=");
+
+   ----------
+   -- Impl --
+   ----------
+
+   package body Impl is
+
+      -------------------
+      -- Dispatch_Free --
+      -------------------
+
+      procedure Dispatch_Free (Self : in out Abstract_Promise_Data'Class) is
+      begin
+         Free (Self);
+      end Dispatch_Free;
+
+      ----------------
+      -- Is_Created --
+      ----------------
+
+      function Is_Created (Self : Root_Promise'Class) return Boolean is
+      begin
+         return not Self.Is_Null;
+      end Is_Created;
+
+      ---------------
+      -- Get_State --
+      ---------------
+
+      function Get_State (Self : Root_Promise'Class) return Promise_State is
+      begin
+         return Self.Get.State;
+      end Get_State;
+
+   end Impl;
+
+   use type Impl.Promise_Callback_Access;
+
+   ----------
+   -- Free --
+   ----------
+
+   procedure Free (Cb : in out Impl.Promise_Callback_Access) is
+   begin
+      if Cb /= null then
+         Impl.Free (Cb.all);
+         Unchecked_Free (Cb);
+      end if;
+   end Free;
 
    ------------
    -- Ignore --
@@ -19,10 +78,40 @@ package body Promises is
 
    package body Promises is
 
-      procedure Unchecked_Free is new Ada.Unchecked_Deallocation
-         (Callback'Class, Callback_Access);
+      type T_Access is access all T;
+      type Callback_Access is access all Callback'Class;
+
+      type Promise_Data (State : Promise_State)
+        is new Impl.Abstract_Promise_Data (State)
+      with record
+         case State is
+            when Pending =>
+               Callbacks : Cb_Vectors.Vector;
+               --  Need a vector here, but should try to limit memory allocs.
+               --  A bounded vector might be more efficient, and sufficient in
+               --  practice.
+
+            when Resolved =>
+               Value     : T_Access;
+               --  ??? Using the ada-traits-containers approach, we could avoid
+               --  some memory allocation here.
+
+            when Failed =>
+               Reason    : GNAT.Strings.String_Access;
+         end case;
+      end record;
+
+      type Promise_Data_Access is access all Promise_Data'Class;
+
+      overriding procedure Free (Self : in out Promise_Data);
+
       procedure Unchecked_Free is new Ada.Unchecked_Deallocation
          (T, T_Access);
+
+      function Get_Data
+        (Self : Promise'Class) return not null access Promise_Data'Class
+        is (Promise_Data_Access (Impl.Promise_Pointers.Unchecked_Get (Self)))
+        with Inline_Always;
 
       ------------
       -- Create --
@@ -32,35 +121,17 @@ package body Promises is
       begin
          return P : Promise do
             P.Set
-               (Data =>
+               (Data => Promise_Data'
                   (Callbacks => Cb_Vectors.Empty_Vector,
                    State     => Pending));
          end return;
       end Create;
 
-      ----------------
-      -- Is_Created --
-      ----------------
-
-      function Is_Created (Self : Promise) return Boolean is
-      begin
-         return not Self.Is_Null;
-      end Is_Created;
-
-      ---------------
-      -- Get_State --
-      ---------------
-
-      function Get_State (Self : Promise) return Promise_State is
-      begin
-         return Self.Get.State;
-      end Get_State;
-
       ----------
       -- Free --
       ----------
 
-      procedure Free (Self : in out Promise_Data) is
+      overriding procedure Free (Self : in out Promise_Data) is
       begin
          --  ??? Should we raise an exception if the promise was neither
          --  resolved nor failed
@@ -84,15 +155,14 @@ package body Promises is
          --  preconditions.
          --  ??? This is not thread safe, we should use an atomic operation,
          --  like GNATCOLL.Atomics.Sync_Bool_Compare_And_Swap
-         if Self.Get.State = Pending then
-            for Cb of Self.Get.Callbacks loop
-               Cb.Resolved (R);
-               Cb.Free;
-               Unchecked_Free (Cb);
+         if Self.Get_Data.State = Pending then
+            for Cb of Self.Get_Data.Callbacks loop
+               Callback_Access (Cb).Resolved (R);
+               Free (Impl.Promise_Callback_Access (Cb));
             end loop;
 
             Self.Set
-               (Data => (State => Resolved, Value => new T'(R)));
+               (Data => Promise_Data'(State => Resolved, Value => new T'(R)));
          end if;
       end Resolve;
 
@@ -106,15 +176,15 @@ package body Promises is
          --  preconditions.
          --  ??? This is not thread safe, we should use an atomic operation,
          --  like GNATCOLL.Atomics.Sync_Bool_Compare_And_Swap
-         if Self.Get.State = Pending then
-            for Cb of Self.Get.Callbacks loop
+         if Self.Get_Data.State = Pending then
+            for Cb of Self.Get_Data.Callbacks loop
                Cb.Failed (Reason);
-               Cb.Free;
-               Unchecked_Free (Cb);
+               Free (Impl.Promise_Callback_Access (Cb));
             end loop;
 
             Self.Set
-               (Data => (State => Failed, Reason => new String'(Reason)));
+               (Data => Promise_Data'
+                  (State => Failed, Reason => new String'(Reason)));
          end if;
       end Fail;
 
@@ -129,33 +199,19 @@ package body Promises is
          --  use "new Cb" directly in the call to When_Done.
          C : Callback_Access := Cb.all'Unrestricted_Access;
       begin
-         case Self.Get.State is
+         case Self.Get_Data.State is
             when Pending =>
-               Self.Get.Callbacks.Append (C);
+               Self.Get_Data.Callbacks.Append
+                  (Impl.Promise_Callback_Access (C));
 
             when Resolved =>
-               C.Resolved (Self.Get.Value.all);
-               C.Free;
-               Unchecked_Free (C);
+               C.Resolved (Self.Get_Data.Value.all);
+               Free (Impl.Promise_Callback_Access (C));
 
             when Failed =>
-               C.Failed (Self.Get.Reason.all);
-               C.Free;
-               Unchecked_Free (C);
+               C.Failed (Self.Get_Data.Reason.all);
+               Free (Impl.Promise_Callback_Access (C));
          end case;
-      end When_Done;
-
-      ---------------
-      -- When_Done --
-      ---------------
-
-      procedure When_Done
-        (Self     : Promise;
-         Resolved : access procedure (R : T) := null;
-         Failed   : access procedure (Reason : String) := null)
-      is
-      begin
-         raise Program_Error with "not implemented yet";
       end When_Done;
 
       -----------
@@ -184,14 +240,24 @@ package body Promises is
       ---------------
 
       function When_Done
-         (Self : Input_Promises.Promise;
-          Cb   : not null access Callback'Class)
+         (Input : Input_Promises.Promise;
+          Cb    : not null access Callback'Class)
          return Output_Promises.Promise is
       begin
          Cb.Promise := Output_Promises.Create;
-         Input_Promises.When_Done (Self, Cb.all'Unrestricted_Access);
+         Input_Promises.When_Done (Input, Cb.all'Unrestricted_Access);
          return Cb.Promise;
       end When_Done;
+
+      -------------------
+      -- Is_Registered --
+      -------------------
+
+      function Is_Registered
+         (Self : not null access Callback'Class) return Boolean is
+      begin
+         return Self.Promise.Is_Created;
+      end Is_Registered;
 
       --------------
       -- Resolved --
@@ -216,18 +282,6 @@ package body Promises is
          --  Propagate the failure
          Self.Promise.Fail (Reason);
       end Failed;
-
-      -----------
-      -- "and" --
-      -----------
-
-      function "and"
-         (Self  : Input_Promises.Promise;
-          Cb    : not null access Callback'Class)
-         return Output_Promises.Promise is
-      begin
-         return When_Done (Self, Cb);
-      end "and";
 
    end Chains;
 
