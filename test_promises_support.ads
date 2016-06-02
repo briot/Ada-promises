@@ -28,4 +28,16 @@ package Test_Promises_Support is
       (Self   : in out Display_String;
        Reason : String);
 
+   type Display_Int is new Int_Promises.Callback with null record;
+   overriding procedure Resolved
+      (Self   : in out Display_Int;
+       P      : Integer);
+
+   type Fail_On_Float is new Float_To_Str.Callback with null record;
+   overriding procedure Resolved
+      (Self   : in out Fail_On_Float;
+       P      : Float;
+       Output : in out Str_Promises.Promise);
+   --  Always fails Output
+
 end Test_Promises_Support;

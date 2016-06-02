@@ -55,7 +55,7 @@
 --       Ignore
 --          (Fetch_URL_Asynchronously ("http://...")
 --           and new Count_Elements
---           and new Report_Count);
+--           and> new Report_Count);
 --
 --   The code above returns immediately, even though the URL will be fetched
 --   in the background (which could take a few seconds), then parsed to count
@@ -141,25 +141,30 @@
 --     Where both B and C are callbacks on A's return promise (and not
 --     chained together).
 --
+--     A more convenient syntax exists, as in the following example:
+--
+--         P and (new A & new B)        --  A.P is passed on to the next step
+--           and (new C & new D)        --  C.P is passed on to the next step
+--           and new E;
+--
+--         If P is resolved:            A.Resolved (P.V), B.Resolved (P.V)
+--            if A.P is resolved:         C.Resolved (A.V), D.Resolved (A.V)
+--               if C.P is resolved:        E.Resolved (C.V)
+--               else C.P failed:           E.Failed (C.R)
+--            else A.P failed:            C.Failed (A.R), D.Failed (A.R),
+--                                          E.Failed (C.R)
+--         else P failed:               A.Failed (P.R), B.Failed (P.R),
+--                                      C.Failed (A.R), D.Failed (A.R),
+--                                      E.Failed (C.R)
+--
+--      Note that there is no guaranteed order in which the callbacks are
+--      executed, so for instance it is possible that C.Resolved and
+--      E.Resolved are called before B.Resolved.
+--
 --  Q: What if I want different resolve and failure callbacks ?
 --  A: A callback is an object with both a Resolved and a Failed primitive
 --     operations. So you could set two different callbacks on the same
 --     promise (as we did above in the first question)
---     A shortcut syntax using the "or" operator exists:
---
---         P and (new A or new B)
---           and (new C or new D)
---           and new E;
---
---     If P is resolved:            A.Resolved (P.V), B.Resolved (P.V)
---        if A.P is resolved:         C.Resolved (A.V), D.Resolved (A.V)
---           if C.P is resolved:        E.Resolved (C.V)
---           else C.P failed:           E.Failed (C.R)
---        else A.P failed:            C.Failed (A.R), D.Failed (A.R),
---                                      E.Failed (C.R)
---     else P failed:               A.Failed (P.R), B.Failed (P.R),
---                                  C.Failed (A.R), D.Failed (A.R),
---                                  E.Failed (C.R)
 
 with GNATCOLL.Refcount;
 
@@ -246,6 +251,7 @@ package Promises is
       ---------------
 
       type Callback is interface and Impl.Promise_Callback;
+      type Callback_Access is access all Callback'Class;
 
       procedure Resolved (Self : in out Callback; R : Result_Type) is null;
       --  Executed when a promise is resolved. It provides the real value
@@ -300,6 +306,24 @@ package Promises is
       --  is a pointer. This means that When_Done can be directly called on
       --  the result of a function call, for instance.
 
+      type Callback_List (<>) is private;
+
+      function "&"
+        (Cb    : not null access Callback'Class;
+         Cb2   : not null access Callback'Class)
+        return Callback_List;
+      function "&"
+        (List  : Callback_List;
+         Cb2   : not null access Callback'Class)
+        return Callback_List;
+
+      procedure When_Done
+       (Self  : Promise; Cb : Callback_List)
+        with Pre  => Self.Is_Created;
+      function "and"
+        (Self : Promise; Cb : Callback_List)
+        return Promise_Chain;
+
       function Is_Created
          (Self : Promise'Class) return Boolean with Inline_Always;
       function Get_State
@@ -307,6 +331,9 @@ package Promises is
 
    private
       type Promise is new Impl.Root_Promise with null record;
+
+      type Callback_List is
+         array (Natural range <>) of not null access Callback'Class;
 
       function Is_Created (Self : Promise'Class) return Boolean
         is (Impl.Is_Created (Self));
@@ -339,8 +366,12 @@ package Promises is
       --  promise, unless you override the Failed primitive operation of
       --  Self.
 
+      type Callback_List (<>) is private;
+
       function Is_Registered
         (Self : not null access Callback'Class) return Boolean
+        with Inline;
+      function Is_Registered (Self : Callback_List) return Boolean
         with Inline;
       --  Whether the callback has already been set on a promise. It is
       --  invalid to use the same callback on multiple promises (or even
@@ -351,7 +382,7 @@ package Promises is
          Cb    : not null access Callback'Class)
         return Output_Promises.Promise
         with
-          Pre  => not Is_Registered (Cb),
+          Pre  => not Is_Registered (Cb) and Input.Is_Created,
           Post => Is_Registered (Cb)
              and When_Done'Result.Is_Created;
       function "and"
@@ -365,6 +396,40 @@ package Promises is
       --  These functions return immediately a promise that will be resolved
       --  later.
 
+      function "&"
+        (Cb    : not null access Callback'Class;
+         Cb2   : not null access Input_Promises.Callback'Class)
+        return Callback_List
+        with
+           Pre => not Is_Registered (Cb);
+           --  ??? Results in GNAT bug box
+           --  Post => "and"'Result = Cb
+           --     and not Is_Registered ("and"'Result);
+      function "&"
+        (List  : Callback_List;
+         Cb2   : not null access Input_Promises.Callback'Class)
+        return Callback_List;
+      --  Used to set multiple callbacks on the same promise, as in:
+      --      P & (new A and new B) & new C
+      --  Only Cb is expected to output a promise, which will be
+      --  forwarded to the next step (C in this example). Cb2 only
+      --  gets notified via its Resolved and Failed primitives.
+
+      function When_Done
+        (Input : Input_Promises.Promise;
+         Cb    : Callback_List)
+        return Output_Promises.Promise
+        with
+          Pre  => not Is_Registered (Cb) and Input.Is_Created,
+          Post => Is_Registered (Cb)
+             and When_Done'Result.Is_Created;
+      function "and"
+        (Input : Input_Promises.Promise;
+         Cb    : Callback_List)
+        return Output_Promises.Promise
+        renames When_Done;
+      --  Chaining multiple callbacks on the same promise
+
    private
       type Callback is abstract new Input_Promises.Callback with record
          Promise : aliased Output_Promises.Promise;
@@ -372,6 +437,13 @@ package Promises is
       overriding procedure Resolved
          (Self : in out Callback; P : Input_Promises.Result_Type);
       overriding procedure Failed (Self : in out Callback; Reason : String);
+
+      type Callback_Array is array (Natural range <>)
+         of not null access Input_Promises.Callback'Class;
+      type Callback_List (N : Natural) is record
+         Cb  : not null access Callback'Class;
+         Cb2 : Callback_Array (1 .. N);
+      end record;
    end Chains;
 
 private

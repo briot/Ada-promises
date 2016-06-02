@@ -79,7 +79,6 @@ package body Promises is
    package body Promises is
 
       type T_Access is access all T;
-      type Callback_Access is access all Callback'Class;
 
       type Promise_Data (State : Promise_State)
         is new Impl.Abstract_Promise_Data (State)
@@ -214,6 +213,30 @@ package body Promises is
          end case;
       end When_Done;
 
+      ---------------
+      -- When_Done --
+      ---------------
+
+      procedure When_Done
+         (Self  : Promise; Cb : Callback_List) is
+      begin
+         for C of Cb loop
+            Self.When_Done (C);
+         end loop;
+      end When_Done;
+
+      -----------
+      -- "and" --
+      -----------
+
+      function "and"
+         (Self : Promise; Cb : Callback_List)
+         return Promise_Chain is
+      begin
+         Self.When_Done (Cb);
+         return Promise_Chain'(null record);
+      end "and";
+
       -----------
       -- "and" --
       -----------
@@ -226,6 +249,31 @@ package body Promises is
          Self.When_Done (Cb);
          return Promise_Chain'(null record);
       end "and";
+
+      ---------
+      -- "&" --
+      ---------
+
+      function "&"
+        (Cb    : not null access Callback'Class;
+         Cb2   : not null access Callback'Class)
+        return Callback_List is
+      begin
+         return (Cb.all'Unrestricted_Access,
+                 Cb2.all'Unrestricted_Access);
+      end "&";
+
+      ---------
+      -- "&" --
+      ---------
+
+      function "&"
+        (List  : Callback_List;
+         Cb2   : not null access Callback'Class)
+        return Callback_List is
+      begin
+         return List & (1 => Cb2.all'Unrestricted_Access);
+      end "&";
 
    end Promises;
 
@@ -249,6 +297,23 @@ package body Promises is
          return Cb.Promise;
       end When_Done;
 
+      ---------------
+      -- When_Done --
+      ---------------
+
+      function When_Done
+        (Input : Input_Promises.Promise;
+         Cb    : Callback_List)
+        return Output_Promises.Promise
+      is
+         P : constant Output_Promises.Promise := When_Done (Input, Cb.Cb);
+      begin
+         for C of Cb.Cb2 loop
+            Input_Promises.When_Done (Input, C);
+         end loop;
+         return P;
+      end When_Done;
+
       -------------------
       -- Is_Registered --
       -------------------
@@ -257,6 +322,16 @@ package body Promises is
          (Self : not null access Callback'Class) return Boolean is
       begin
          return Self.Promise.Is_Created;
+      end Is_Registered;
+
+      -------------------
+      -- Is_Registered --
+      -------------------
+
+      function Is_Registered
+         (Self : Callback_List) return Boolean is
+      begin
+         return Self.Cb.Promise.Is_Created;
       end Is_Registered;
 
       --------------
@@ -282,6 +357,32 @@ package body Promises is
          --  Propagate the failure
          Self.Promise.Fail (Reason);
       end Failed;
+
+      -----------
+      -- "&" --
+      -----------
+
+      function "&"
+         (Cb   : not null access Callback'Class;
+          Cb2  : not null access Input_Promises.Callback'Class)
+         return Callback_List is
+      begin
+         return Callback_List'
+            (N   => 1,
+             Cb  => Cb.all'Unrestricted_Access,
+             Cb2 => (1 => Cb2.all'Unrestricted_Access));
+      end "&";
+
+      function "&"
+         (List : Callback_List;
+          Cb2  : not null access Input_Promises.Callback'Class)
+         return Callback_List is
+      begin
+         return Callback_List'
+            (N   => List.N + 1,
+             Cb  => List.Cb,
+             Cb2 => List.Cb2 & (1 => Cb2.all'Unrestricted_Access));
+      end "&";
 
    end Chains;
 

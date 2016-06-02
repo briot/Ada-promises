@@ -25,6 +25,15 @@ package body Test_Promises_Support is
    end Resolved;
 
    overriding procedure Resolved
+      (Self   : in out Display_Int;
+       P      : Integer)
+   is
+      pragma Unreferenced (Self);
+   begin
+      Put_Line ("Display_Int.Resolved  input=" & P'Img);
+   end Resolved;
+
+   overriding procedure Resolved
       (Self   : in out Display_String;
        P      : String)
    is
@@ -41,5 +50,16 @@ package body Test_Promises_Support is
    begin
       Put_Line ("Display_String.Failed because " & Reason);
    end Failed;
+
+   overriding procedure Resolved
+      (Self   : in out Fail_On_Float;
+       P      : Float;
+       Output : in out Str_Promises.Promise)
+   is
+      pragma Unreferenced (Self, P);
+   begin
+      Put_Line ("Fail_On_Float: mark output as failed");
+      Output.Fail ("explicit");
+   end Resolved;
 
 end Test_Promises_Support;
