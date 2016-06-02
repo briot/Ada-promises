@@ -105,15 +105,47 @@
 --        and new B     --  B is the callback on the promise returned by A
 --        and new C;    --  C is the callback on the promise returned by C
 --
---  The following callbacks might occur:
+--  The following callbacks might occur (where *.P is the promise output
+--  by the routine, *.V is the value of that promise, and *.R is the reason
+--  for the failure of that promise, which defaults to the reason received
+--  from the previous release unless overridden):
 --
 --       promises                                    calls
---  If P is resolved:                         A.Resolved
---     If A's promise is resolved:              B.Resolved
---        if B's promise is resolved:             C.Resolved
---        else B's promise is failed:             C.Failed
---     else A's promise is failed:              B.Failed and C.Failed
---  else P failed:                            A.Failed, B.Failed and C.Failed
+--  If P is resolved:           A.Resolved (P.V)
+--     If A.P is resolved:         B.Resolved (A.V)
+--        if B.P is resolved:        C.Resolved (B.V)
+--        else B.P failed:           C.Failed (B.R)
+--     else A.P failed:            B.Failed (A.R), C.Failed (B.R)
+--  else P failed:              A.Failed (P.R), B.Failed (A.R), C.Failed (B.R)
+--
+--
+--  Q: What if I want multiple callbacks on the same promise ?
+--  A: You need to use intermediate variables, as in:
+--       Q := P and new A;
+--       Ignore (Q and new B);
+--       Ignore (Q and new C);
+--     Where both B and C are callbacks on A's return promise (and not
+--     chained together).
+--
+--  Q: What if I want different resolve and failure callbacks ?
+--  A: A callback is an object with both a Resolved and a Failed primitive
+--     operations. So you could set two different callbacks on the same
+--     promise (as we did above in the first question)
+--     A shortcut syntax using the "or" operator exists:
+--
+--         P and (new A or new B)
+--           and (new C or new D)
+--           and new E;
+--
+--     If P is resolved:            A.Resolved (P.V), B.Resolved (P.V)
+--        if A.P is resolved:         C.Resolved (A.V), D.Resolved (A.V)
+--           if C.P is resolved:        E.Resolved (C.V)
+--           else C.P failed:           E.Failed (C.R)
+--        else A.P failed:            C.Failed (A.R), D.Failed (A.R),
+--                                      E.Failed (C.R)
+--     else P failed:               A.Failed (P.R), B.Failed (P.R),
+--                                  C.Failed (A.R), D.Failed (A.R),
+--                                  E.Failed (C.R)
 
 with Ada.Containers.Vectors;
 with GNATCOLL.Refcount;
