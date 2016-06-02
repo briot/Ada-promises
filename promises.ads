@@ -100,18 +100,9 @@
 --  itself return a promise, whose callback might in turn return a promise,
 --  and so on.
 --
---  Several equivalent syntaxes are available. One uses function calls,
---  and the other uses overloaded operators which perhaps leads to code
---  easier to read. The following two examples are equivalent:
---
---       Float_To_Str.When_Done
---          (Int_To_Float.When_Done (P, new A),
---           new B)
---          .When_Done (new C)
+--  The syntax to chain promises is:
 --
 --       Start (P and new A and new B and new C;
---
---  From now on, we will only use the second syntax.
 --
 --  Let's take the following chain:
 --
@@ -317,9 +308,6 @@ package Promises is
          Cb2   : not null access Callback'Class)
         return Callback_List;
 
-      procedure When_Done
-       (Self  : Promise; Cb : Callback_List)
-        with Pre  => Self.Is_Created;
       function "and"
         (Self : Promise; Cb : Callback_List)
         return Promise_Chain;
@@ -377,19 +365,14 @@ package Promises is
       --  invalid to use the same callback on multiple promises (or even
       --  multiple times on the same promise).
 
-      function When_Done
+      function "and"
         (Input : Input_Promises.Promise;
          Cb    : not null access Callback'Class)
         return Output_Promises.Promise
         with
           Pre  => not Is_Registered (Cb) and Input.Is_Created,
           Post => Is_Registered (Cb)
-             and When_Done'Result.Is_Created;
-      function "and"
-        (Input : Input_Promises.Promise;
-         Cb    : not null access Callback'Class)
-        return Output_Promises.Promise
-        renames When_Done;
+             and "and"'Result.Is_Created;
       --  Chains two properties.
       --  When Input is resolved, Cb is executed and will in turn resolve
       --  the output promise
@@ -415,19 +398,14 @@ package Promises is
       --  forwarded to the next step (C in this example). Cb2 only
       --  gets notified via its Resolved and Failed primitives.
 
-      function When_Done
+      function "and"
         (Input : Input_Promises.Promise;
          Cb    : Callback_List)
         return Output_Promises.Promise
         with
           Pre  => not Is_Registered (Cb) and Input.Is_Created,
           Post => Is_Registered (Cb)
-             and When_Done'Result.Is_Created;
-      function "and"
-        (Input : Input_Promises.Promise;
-         Cb    : Callback_List)
-        return Output_Promises.Promise
-        renames When_Done;
+             and "and"'Result.Is_Created;
       --  Chaining multiple callbacks on the same promise
 
    private

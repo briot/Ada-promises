@@ -213,18 +213,6 @@ package body Promises is
          end case;
       end When_Done;
 
-      ---------------
-      -- When_Done --
-      ---------------
-
-      procedure When_Done
-         (Self  : Promise; Cb : Callback_List) is
-      begin
-         for C of Cb loop
-            Self.When_Done (C);
-         end loop;
-      end When_Done;
-
       -----------
       -- "and" --
       -----------
@@ -233,7 +221,9 @@ package body Promises is
          (Self : Promise; Cb : Callback_List)
          return Promise_Chain is
       begin
-         Self.When_Done (Cb);
+         for C of Cb loop
+            Self.When_Done (C);
+         end loop;
          return Promise_Chain'(null record);
       end "and";
 
@@ -283,11 +273,11 @@ package body Promises is
 
    package body Chains is
 
-      ---------------
-      -- When_Done --
-      ---------------
+      -----------
+      -- "and" --
+      -----------
 
-      function When_Done
+      function "and"
          (Input : Input_Promises.Promise;
           Cb    : not null access Callback'Class)
          return Output_Promises.Promise is
@@ -295,24 +285,24 @@ package body Promises is
          Cb.Promise := Output_Promises.Create;
          Input_Promises.When_Done (Input, Cb.all'Unrestricted_Access);
          return Cb.Promise;
-      end When_Done;
+      end "and";
 
-      ---------------
-      -- When_Done --
-      ---------------
+      -----------
+      -- "and" --
+      -----------
 
-      function When_Done
+      function "and"
         (Input : Input_Promises.Promise;
          Cb    : Callback_List)
         return Output_Promises.Promise
       is
-         P : constant Output_Promises.Promise := When_Done (Input, Cb.Cb);
+         P : constant Output_Promises.Promise := Input and Cb.Cb;
       begin
          for C of Cb.Cb2 loop
             Input_Promises.When_Done (Input, C);
          end loop;
          return P;
-      end When_Done;
+      end "and";
 
       -------------------
       -- Is_Registered --
@@ -372,6 +362,10 @@ package body Promises is
              Cb  => Cb.all'Unrestricted_Access,
              Cb2 => (1 => Cb2.all'Unrestricted_Access));
       end "&";
+
+      -----------
+      -- "&" --
+      -----------
 
       function "&"
          (List : Callback_List;
