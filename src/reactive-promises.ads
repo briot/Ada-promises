@@ -94,6 +94,18 @@
 --     already been resolved, the callback is executed immediately with the
 --     value set on that promise.
 --
+--  Tasks
+--  =====
+--
+--  Promises are task safe. They can be used from multiple threads (and, as
+--  always, a single call to Set_Value or Set_Error can be done), subscribed
+--  to from multiple threads,...
+--  However, the value itself is under your control. Although the promise
+--  will only execute one callback at a time, to which is passes the value,
+--  you should ensure that the value is not used from another thread in
+--  parallel, or provide appropriate locking.
+--  Using simple types like Integers or Strings should be safe.
+--
 --  Chaining and callbacks
 --  ======================
 --
@@ -125,7 +137,6 @@
 --  else P failed:              A.On_Error (P.R), B.On_Error (A.R),
 --                                 C.On_Error (B.R)
 --
---
 --  Q: What if I want multiple callbacks on the same promise ?
 --  A: You need to use intermediate variables, as in:
 --       Q := P and new A;
@@ -154,17 +165,29 @@
 --      executed, so for instance it is possible that C.On_Next and
 --      E.On_Next are called before B.On_Next.
 --
---  Q: What if I want different resolve and failure callbacks ?
+--  Q: What if I want different success and failure callbacks ?
 --  A: A callback is an object with both a On_Next and a On_Error primitive
 --     operations. So you could set two different callbacks on the same
 --     promise (as we did above in the first question)
 
+with GNATCOLL.Atomic;
 with GNATCOLL.Refcount;
 
 package Reactive.Promises is
 
-   type Promise_State is (Pending, Resolved, Failed);
-   --  The various states that a promise can have
+   use type GNATCOLL.Atomic.Atomic_Counter;
+
+   subtype Promise_State is GNATCOLL.Atomic.Atomic_Counter;
+   Pending     : constant Promise_State := 0;
+   Resolved    : constant Promise_State := 1;
+   Failed      : constant Promise_State := 2;
+   Resolving   : constant Promise_State := 3;
+   Failing     : constant Promise_State := 4;
+   Subscribing : constant Promise_State := 5;
+   subtype Actual_Promise_State is Promise_State range Pending .. Subscribing;
+   --  The various states that a promise can have.
+   --  We use atomic operations when possible to manipulate it, to make
+   --  promises task safe.
 
    type Promise_Chain is tagged private;
    procedure Subscribe (Self : Promise_Chain) with Inline => True;
@@ -174,21 +197,6 @@ package Reactive.Promises is
    --  Do not mark this procedure as "is null", since otherwise GNAT
    --  does not even call the last "and" in the chain.
 
-   --------------
-   -- IFreeable --
-   --------------
-
-   type IFreeable is interface;
-   type Freeable_Access is access all IFreeable'Class;
-   --  a general interface for objects that have an explicit Free
-   --  primitive operation.
-
-   procedure Free (Self : in out IFreeable) is null;
-   --  Free internal data of Self
-
-   procedure Free (Self : in out Freeable_Access);
-   --  Free self, via its primitive operation, and then free the pointer
-
    ----------
    -- Impl --
    ----------
@@ -196,36 +204,19 @@ package Reactive.Promises is
 
    package Impl is
 
-      type Abstract_Promise_Data
-         (State : Promise_State) is abstract tagged null record;
-      type Abstract_Promise_Data_Access
-         is access all Abstract_Promise_Data'Class;
-      procedure Free (Self : in out Abstract_Promise_Data) is null;
-      procedure Dispatch_Free (Self : in out Abstract_Promise_Data'Class);
+      type IPromise_Data is interface;
+      procedure Free (Self : in out IPromise_Data) is null;
+      procedure Dispatch_Free (Self : in out IPromise_Data'Class);
 
       type IAbstract_Promise is interface;
 
       package Promise_Pointers is new GNATCOLL.Refcount.Shared_Pointers
-         (Element_Type           => Abstract_Promise_Data'Class,
+         (Element_Type           => IPromise_Data'Class,
           Release                => Dispatch_Free,
           Atomic_Counters        => True,   --  thread-safe
           Potentially_Controlled => True);  --  a vector is controlled
       type Root_Promise is
          new Promise_Pointers.Ref and IAbstract_Promise with null record;
-
-      function Is_Created (Self : Root_Promise'Class) return Boolean
-        with Inline;
-      --  Whether the promise has been created
-
-      function Get_State (Self : Root_Promise'Class) return Promise_State
-        with
-          Inline,
-          Pre => Self.Is_Created;
-      --  Return the state of the promise
-
-      ---------------
-      -- Callbacks --
-      ---------------
 
       type IPromise_Callback is interface and IFreeable;
       type Promise_Callback_Access is access all IPromise_Callback'Class;
@@ -278,7 +269,9 @@ package Reactive.Promises is
 
       procedure Set_Value (Self : in out Promise; R : T)
         with
-          Pre => Self.Is_Created and Self.Get_State = Pending,
+          Pre => Self.Is_Created
+             and Self.Get_State /= Resolved
+             and Self.Get_State /= Failed,
           Post => Self.Get_State = Resolved;
       --  Give a result to the promise.
       --  The callbacks' On_Next methods are executed.
@@ -286,7 +279,9 @@ package Reactive.Promises is
 
       procedure Set_Error (Self : in out Promise; Reason : String)
         with
-          Pre => Self.Is_Created and Self.Get_State = Pending,
+          Pre => Self.Is_Created
+             and Self.Get_State /= Resolved
+             and Self.Get_State /= Failed,
           Post => Self.Get_State = Failed;
       --  Mark the promise has failed. It will never be resolved.
       --  The callbacks' On_Error method are executed.
@@ -328,8 +323,10 @@ package Reactive.Promises is
 
       function Is_Created
          (Self : Promise'Class) return Boolean with Inline_Always;
+      --  Whether the promise has been created
+
       function Get_State
-         (Self : Promise'Class) return Promise_State with Inline_Always;
+        (Self : Promise'Class) return Actual_Promise_State with Inline_Always;
       --  Used for pre and post conditions
 
    private
@@ -339,9 +336,7 @@ package Reactive.Promises is
          array (Natural range <>) of not null access Callback'Class;
 
       function Is_Created (Self : Promise'Class) return Boolean
-        is (Impl.Is_Created (Self));
-      function Get_State (Self : Promise'Class) return Promise_State
-        is (Impl.Get_State (Self));
+        is (not Self.Is_Null);
    end Promises;
 
    ------------
@@ -360,7 +355,10 @@ package Reactive.Promises is
          Input  : Input_Promises.Result_Type;
          Output : in out Output_Promises.Promise)
         is abstract
-        with Post'Class => Output.Get_State /= Pending;
+        with
+           Post'Class =>
+              Output.Get_State = Resolved
+              or Output.Get_State = Failed;
       --  This is the procedure that needs overriding, not the one inherited
       --  from Input_Promises. When chaining, a callback returns another
       --  promise, to which the user can attach further callbacks, and so on.

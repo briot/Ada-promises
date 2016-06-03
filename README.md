@@ -2,7 +2,7 @@
 Ada Promises
 ============
 
-The promise pattern is now ubiquous in programming languages.
+The promise pattern is now ubiquitous in programming languages.
 The Wikipedia page on promises lists a lot of implementations.
 But there are none for Ada yet !
 
@@ -74,9 +74,12 @@ Various improvement ideas for this library:
 
      One way to limit this is by taking subprogram access instead of
      tagged types. The latter are still useful when additional data needs
-     to be passed though (simulates lamda functions for instance).
+     to be passed though (simulates lambda functions for instance).
 
    - Add more use cases
      Show how to use tasks along with promises.
-        (Should actually make promises task safe first)
      Show how to use promises in a gtk+ context
+
+   - Should we raise an exception when a promise is freed but was never
+     resolved or failed ?
+     Or when Set_Value is called multiple times ?
