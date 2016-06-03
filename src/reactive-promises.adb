@@ -6,36 +6,17 @@ with GNATCOLL.Atomic;    use GNATCOLL.Atomic;
 
 package body Reactive.Promises is
 
-   use type Impl.Promise_Callback_Access;
-
    package Cb_Vectors is new Ada.Containers.Vectors
-      (Positive, Impl.Promise_Callback_Access, Impl."=");
+      (Positive, IObserver_Access);
 
-   ---------------
-   -- Subscribe --
-   ---------------
+   -------------------
+   -- Dispatch_Free --
+   -------------------
 
-   procedure Subscribe (Self : Promise_Chain) is
+   procedure Dispatch_Free (Self : in out IPromise_Data'Class) is
    begin
-      null;
-   end Subscribe;
-
-   ----------
-   -- Impl --
-   ----------
-
-   package body Impl is
-
-      -------------------
-      -- Dispatch_Free --
-      -------------------
-
-      procedure Dispatch_Free (Self : in out IPromise_Data'Class) is
-      begin
-         Free (Self);
-      end Dispatch_Free;
-
-   end Impl;
+      Free (Self);
+   end Dispatch_Free;
 
    --------------
    -- Promises --
@@ -45,8 +26,8 @@ package body Reactive.Promises is
 
       type T_Access is access all T;
 
-      type Promise_Data is new Impl.IPromise_Data with record
-         State     : aliased Promise_State := Pending;
+      type Promise_Data is new IPromise_Data with record
+         State     : aliased Base_Promise_State := Pending;
 
          Callbacks : Cb_Vectors.Vector;
          --  Need a vector here, but should try to limit memory allocs.
@@ -70,11 +51,11 @@ package body Reactive.Promises is
       -- Get_State --
       ---------------
 
-      function Get_State (Self : Promise'Class) return Actual_Promise_State is
+      function Get_State (Self : Promise'Class) return Promise_State is
          D : constant not null access Promise_Data'Class :=
-            Promise_Data_Access (Impl.Promise_Pointers.Unchecked_Get (Self));
+            Promise_Data_Access (Promise_Pointers.Unchecked_Get (Self));
       begin
-         return Actual_Promise_State (D.State);
+         return Promise_State (D.State);
       end Get_State;
 
       ------------
@@ -109,11 +90,11 @@ package body Reactive.Promises is
 
       procedure Set_Value (Self : in out Promise; R : T) is
          D : constant not null access Promise_Data'Class :=
-            Promise_Data_Access (Impl.Promise_Pointers.Unchecked_Get (Self));
-         Old : Actual_Promise_State;
+            Promise_Data_Access (Promise_Pointers.Unchecked_Get (Self));
+         Old : Promise_State;
       begin
          loop
-            Old := Actual_Promise_State
+            Old := Promise_State
                (Sync_Val_Compare_And_Swap_Counter
                   (Ptr    => D.State'Access,
                    Oldval => Pending,
@@ -130,8 +111,8 @@ package body Reactive.Promises is
                when Pending =>
                   --  OK, we can change the state
                   for Cb of D.Callbacks loop
-                     Callback_Access (Cb).On_Next (R);
-                     Free (Freeable_Access (Cb));
+                     Observers.IObserver_Access (Cb).On_Next (R);
+                     Free (IFreeable_Access (Cb));
                   end loop;
 
                   D.Callbacks.Clear;   --  No longer needed, release them
@@ -148,11 +129,11 @@ package body Reactive.Promises is
 
       procedure Set_Error (Self : in out Promise; Reason : String) is
          D : constant not null access Promise_Data'Class :=
-            Promise_Data_Access (Impl.Promise_Pointers.Unchecked_Get (Self));
-         Old : Actual_Promise_State;
+            Promise_Data_Access (Promise_Pointers.Unchecked_Get (Self));
+         Old : Promise_State;
       begin
          loop
-            Old := Actual_Promise_State
+            Old := Promise_State
                (Sync_Val_Compare_And_Swap_Counter
                   (Ptr    => D.State'Access,
                    Oldval => Pending,
@@ -169,8 +150,8 @@ package body Reactive.Promises is
                when Pending =>
                   --  OK, we can change the state
                   for Cb of D.Callbacks loop
-                     Callback_Access (Cb).On_Error (Reason);
-                     Free (Freeable_Access (Cb));
+                     Observers.IObserver_Access (Cb).On_Error (Reason);
+                     Free (IFreeable_Access (Cb));
                   end loop;
 
                   D.Callbacks.Clear;   --  No longer needed, release them
@@ -185,19 +166,20 @@ package body Reactive.Promises is
       -- Subscribe --
       ---------------
 
-      procedure Subscribe
+      overriding function Subscribe
         (Self : Promise; Cb : not null access Callback'Class)
+        return Subscription
       is
          D : constant not null access Promise_Data'Class :=
-            Promise_Data_Access (Impl.Promise_Pointers.Unchecked_Get (Self));
+            Promise_Data_Access (Promise_Pointers.Unchecked_Get (Self));
 
          --  ??? Unrestricted_Access is temporary, so that user can
          --  use "new Cb" directly in the call to Subscribe.
-         C : Callback_Access := Cb.all'Unrestricted_Access;
-         Old : Actual_Promise_State;
+         C : Observers.IObserver_Access := Cb.all'Unrestricted_Access;
+         Old : Promise_State;
       begin
          loop
-            Old := Actual_Promise_State
+            Old := Promise_State
                (Sync_Val_Compare_And_Swap_Counter
                   (Ptr    => D.State'Access,
                    Oldval => Pending,
@@ -211,73 +193,23 @@ package body Reactive.Promises is
                   --  We don't need to change D, so we leave the state to
                   --  Pending
                   C.On_Next (D.Value.all);
-                  Free (Freeable_Access (C));
-                  return;
+                  Free (IFreeable_Access (C));
+                  exit;
 
                when Failed =>
                   C.On_Error (D.Reason.all);
-                  Free (Freeable_Access (C));
-                  return;
+                  Free (IFreeable_Access (C));
+                  exit;
 
                when Pending =>
-                  D.Callbacks.Append (Impl.Promise_Callback_Access (C));
+                  D.Callbacks.Append (IObserver_Access (C));
                   D.State := Pending;
                   exit;
             end case;
          end loop;
+
+         return Empty_Subscription;
       end Subscribe;
-
-      -----------
-      -- "and" --
-      -----------
-
-      function "and"
-         (Self : Promise; Cb : Callback_List)
-         return Promise_Chain is
-      begin
-         for C of Cb loop
-            Self.Subscribe (C);
-         end loop;
-         return Promise_Chain'(null record);
-      end "and";
-
-      -----------
-      -- "and" --
-      -----------
-
-      function "and"
-         (Self  : Promise;
-          Cb    : not null access Callback'Class)
-         return Promise_Chain is
-      begin
-         Self.Subscribe (Cb);
-         return Promise_Chain'(null record);
-      end "and";
-
-      ---------
-      -- "&" --
-      ---------
-
-      function "&"
-        (Cb    : not null access Callback'Class;
-         Cb2   : not null access Callback'Class)
-        return Callback_List is
-      begin
-         return (Cb.all'Unrestricted_Access,
-                 Cb2.all'Unrestricted_Access);
-      end "&";
-
-      ---------
-      -- "&" --
-      ---------
-
-      function "&"
-        (List  : Callback_List;
-         Cb2   : not null access Callback'Class)
-        return Callback_List is
-      begin
-         return List & (1 => Cb2.all'Unrestricted_Access);
-      end "&";
 
    end Promises;
 
@@ -294,10 +226,12 @@ package body Reactive.Promises is
       function "and"
          (Input : Input_Promises.Promise;
           Cb    : not null access Callback'Class)
-         return Output_Promises.Promise is
+         return Output_Promises.Promise
+      is
+         Dummy : Subscription;
       begin
          Cb.Promise := Output_Promises.Create;
-         Input_Promises.Subscribe (Input, Cb.all'Unrestricted_Access);
+         Dummy := Input_Promises.Subscribe (Input, Cb.all'Unrestricted_Access);
          return Cb.Promise;
       end "and";
 
@@ -311,9 +245,10 @@ package body Reactive.Promises is
         return Output_Promises.Promise
       is
          P : constant Output_Promises.Promise := Input and Cb.Cb;
+         Dummy : Subscription;
       begin
          for C of Cb.Cb2 loop
-            Input_Promises.Subscribe (Input, C);
+            Dummy := Input_Promises.Subscribe (Input, C);
          end loop;
          return P;
       end "and";

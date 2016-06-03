@@ -177,55 +177,36 @@ package Reactive.Promises is
 
    use type GNATCOLL.Atomic.Atomic_Counter;
 
-   subtype Promise_State is GNATCOLL.Atomic.Atomic_Counter;
-   Pending     : constant Promise_State := 0;
-   Resolved    : constant Promise_State := 1;
-   Failed      : constant Promise_State := 2;
-   Resolving   : constant Promise_State := 3;
-   Failing     : constant Promise_State := 4;
-   Subscribing : constant Promise_State := 5;
-   subtype Actual_Promise_State is Promise_State range Pending .. Subscribing;
+   subtype Base_Promise_State is GNATCOLL.Atomic.Atomic_Counter;
+   Pending     : constant Base_Promise_State := 0;
+   Resolved    : constant Base_Promise_State := 1;
+   Failed      : constant Base_Promise_State := 2;
+   Resolving   : constant Base_Promise_State := 3;
+   Failing     : constant Base_Promise_State := 4;
+   Subscribing : constant Base_Promise_State := 5;
+   subtype Promise_State is Base_Promise_State range Pending .. Subscribing;
    --  The various states that a promise can have.
    --  We use atomic operations when possible to manipulate it, to make
    --  promises task safe.
 
-   type Promise_Chain is tagged private;
-   procedure Subscribe (Self : Promise_Chain) with Inline => True;
-   --  A dummy type used when chaining promises with the "and"
-   --  operator. See below for an example of code.
-   --
-   --  Do not mark this procedure as "is null", since otherwise GNAT
-   --  does not even call the last "and" in the chain.
-
    ----------
    -- Impl --
    ----------
-   --  This package is for implementation details
+   --  This section is for implementation details
 
-   package Impl is
+   type IPromise_Data is interface;
+   procedure Free (Self : in out IPromise_Data) is null;
+   procedure Dispatch_Free (Self : in out IPromise_Data'Class);
 
-      type IPromise_Data is interface;
-      procedure Free (Self : in out IPromise_Data) is null;
-      procedure Dispatch_Free (Self : in out IPromise_Data'Class);
+   type IAbstract_Promise is interface;
 
-      type IAbstract_Promise is interface;
-
-      package Promise_Pointers is new GNATCOLL.Refcount.Shared_Pointers
-         (Element_Type           => IPromise_Data'Class,
-          Release                => Dispatch_Free,
-          Atomic_Counters        => True,   --  thread-safe
-          Potentially_Controlled => True);  --  a vector is controlled
-      type Root_Promise is
-         new Promise_Pointers.Ref and IAbstract_Promise with null record;
-
-      type IPromise_Callback is interface and IFreeable;
-      type Promise_Callback_Access is access all IPromise_Callback'Class;
-
-      procedure On_Error
-         (Self : in out IPromise_Callback; Reason : String) is null;
-      --  Called when a promise has failed and will never be resolved.
-
-   end Impl;
+   package Promise_Pointers is new GNATCOLL.Refcount.Shared_Pointers
+      (Element_Type           => IPromise_Data'Class,
+       Release                => Dispatch_Free,
+       Atomic_Counters        => True,   --  thread-safe
+       Potentially_Controlled => True);  --  a vector is controlled
+   type Root_Promise is
+      new Promise_Pointers.Ref and IAbstract_Promise with null record;
 
    --------------
    -- Promises --
@@ -234,32 +215,18 @@ package Reactive.Promises is
    generic
       type T (<>) is private;
    package Promises is
+      subtype Result_Type is T;
 
-      type Promise is new Impl.IAbstract_Promise with private;
+      package Observers is new Typed_Observers (T);
+      package Observables is new Typed_Observables (Observers);
+
+      type Promise is new IAbstract_Promise and Observables.IObservable
+         with private;
       --  A promise is a smart pointer: it is a wrapper around shared
       --  data that is freed when no more reference to the promise
       --  exists.
 
-      subtype Result_Type is T;
-
-      ---------------
-      -- Callbacks --
-      ---------------
-
-      type Callback is interface and Impl.IPromise_Callback;
-      type Callback_Access is access all Callback'Class;
-
-      procedure On_Next (Self : in out Callback; R : Result_Type) is null;
-      --  Executed when a promise is resolved. It provides the real value
-      --  associated with the promise.
-
-      type Callback_List (<>) is private;
-      --  Multiple callbacks, all subscribed to the same promise (or
-      --  will be subscribed to the same promise).
-
-      --------------
-      -- Promises --
-      --------------
+      subtype Callback is Observers.IObserver;
 
       function Create return Promise
         with
@@ -286,54 +253,44 @@ package Reactive.Promises is
       --  Mark the promise has failed. It will never be resolved.
       --  The callbacks' On_Error method are executed.
 
-      procedure Subscribe
+      overriding function Subscribe
         (Self : Promise;
          Cb   : not null access Callback'Class)
+        return Subscription
         with Pre => Self.Is_Created;
+
       function "and"
         (Self  : Promise;
-         Cb    : not null access Callback'Class) return Promise_Chain
+         Cb    : not null access Observers.IObserver'Class)
+        return Subscription
+        is (Observables."and" (Self, Cb))
         with Pre => Self.Is_Created;
       function "and"
-        (Self : Promise; Cb : Callback_List) return Promise_Chain
+        (Self : Promise; Cb : Observers.List) return Subscription
+        is (Observables."and" (Self, Cb))
         with Pre => Self.Is_Created;
-      --  Will call Cb when Self is resolved or failed (or immediately if Self
-      --  has already been resolved or failed).
-      --  Any number of callbacks can be set on each promise.
-      --  If you want to chain promises (i.e. your callback itself returns
-      --  a promise), take a look at the Chains package below.
-      --
-      --  Cb must be allocated specifically for this call, and will be
-      --  freed as needed. You must not reuse the same pointer for multiple
-      --  calls to Subscribe.
-      --  ??? This is unsafe
-      --
-      --  Self is modified, but does not need to be "in out" since a promise
-      --  is a pointer. This means that Subscribe can be directly called on
-      --  the result of a function call, for instance.
 
+      subtype List is Observers.List;
       function "&"
         (Cb    : not null access Callback'Class;
-         Cb2   : not null access Callback'Class) return Callback_List;
+         Cb2   : not null access Callback'Class) return List
+        renames Observers."&";
       function "&"
-        (List  : Callback_List;
-         Cb2   : not null access Callback'Class) return Callback_List;
-      --  Create a list of callbacks that will all be subscribed to the same
-      --  promise.
+        (Self  : List;
+         Cb2   : not null access Callback'Class) return List
+        renames Observers."&";
 
       function Is_Created
          (Self : Promise'Class) return Boolean with Inline_Always;
       --  Whether the promise has been created
 
       function Get_State
-        (Self : Promise'Class) return Actual_Promise_State with Inline_Always;
+        (Self : Promise'Class) return Promise_State with Inline_Always;
       --  Used for pre and post conditions
 
    private
-      type Promise is new Impl.Root_Promise with null record;
-
-      type Callback_List is
-         array (Natural range <>) of not null access Callback'Class;
+      type Promise is new Root_Promise and Observables.IObservable
+         with null record;
 
       function Is_Created (Self : Promise'Class) return Boolean
         is (not Self.Is_Null);

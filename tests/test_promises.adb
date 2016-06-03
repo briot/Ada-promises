@@ -1,5 +1,5 @@
 with GNAT.IO;                use GNAT.IO;
-with Reactive.Promises;      use Reactive.Promises;
+with Reactive.Promises;      use Reactive, Reactive.Promises;
 with Test_Promises_Support;  use Test_Promises_Support;
 
 procedure Test_Promises is
@@ -20,26 +20,26 @@ procedure Test_Promises is
 begin
    Put_Line ("=== Create chain");
    P := Get_Promise;
-   Subscribe (P and (new Convert_Int & new Display_Int)
-                and new Convert_Float
-                and (new Display_String & new Display_String));
+   Run (P and (new Convert_Int & new Display_Int)
+          and new Convert_Float
+          and (new Display_String & new Display_String));
 
    Put_Line ("Resolving...");
    P.Set_Value (2);
 
    Put_Line ("=== Create chain, will Fail");
    P := Get_Promise;
-   Subscribe (P and new Convert_Int
-                and new Convert_Float
-                and new Display_String);
+   Run (P and new Convert_Int
+          and new Convert_Float
+          and new Display_String);
    Put_Line ("Failing...");
    P.Set_Error ("Explicit failure");
 
    Put_Line ("=== Create chain, will Fail in middle");
    P := Get_Promise;
-   Subscribe (P and new Convert_Int
-                and new Fail_On_Float
-                and (new Display_String & new Display_String));
+   Run (P and new Convert_Int
+          and new Fail_On_Float
+          and (new Display_String & new Display_String));
    P.Set_Value (3);
 
 end Test_Promises;
