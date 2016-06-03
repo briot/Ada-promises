@@ -3,7 +3,7 @@ with Ada.Exceptions;     use Ada.Exceptions;
 with Ada.Unchecked_Deallocation;
 with GNAT.Strings;       use GNAT.Strings;
 
-package body Promises is
+package body Reactive.Promises is
 
    package Cb_Vectors is new Ada.Containers.Vectors
       (Positive, Impl.Promise_Callback_Access, Impl."=");
@@ -376,4 +376,4 @@ package body Promises is
 
    end Chains;
 
-end Promises;
+end Reactive.Promises;

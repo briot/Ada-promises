@@ -1,6 +1,6 @@
-with GNAT.IO;   use GNAT.IO;
-with Promises;  use Promises;
-with Test_Promises_Support;   use Test_Promises_Support;
+with GNAT.IO;                use GNAT.IO;
+with Reactive.Promises;      use Reactive.Promises;
+with Test_Promises_Support;  use Test_Promises_Support;
 
 procedure Test_Promises is
    use Int_To_Float, Float_To_Str, Str_Promises;

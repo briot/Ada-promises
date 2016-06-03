@@ -1,3 +1,5 @@
 *.o
 *.ali
 test_promises
+obj/
+manu/

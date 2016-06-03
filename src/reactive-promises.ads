@@ -161,7 +161,7 @@
 
 with GNATCOLL.Refcount;
 
-package Promises is
+package Reactive.Promises is
 
    type Promise_State is (Pending, Resolved, Failed);
    --  The various states that a promise can have
@@ -441,4 +441,4 @@ package Promises is
 
 private
    type Promise_Chain is tagged null record;
-end Promises;
+end Reactive.Promises;

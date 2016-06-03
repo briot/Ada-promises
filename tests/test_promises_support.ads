@@ -1,9 +1,9 @@
-with Promises; use Promises;
+with Reactive.Promises; use Reactive.Promises;
 
 package Test_Promises_Support is
-   package Int_Promises is new Promises.Promises (Integer);
-   package Float_Promises is new Promises.Promises (Float);
-   package Str_Promises is new Promises.Promises (String);
+   package Int_Promises is new Promises (Integer);
+   package Float_Promises is new Promises (Float);
+   package Str_Promises is new Promises (String);
 
    package Int_To_Float is new Chains (Int_Promises, Float_Promises);
    package Float_To_Str is new Chains (Float_Promises, Str_Promises);

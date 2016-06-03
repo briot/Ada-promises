@@ -119,6 +119,9 @@ Various improvement ideas for this library:
      resolved ? This would only work when the routines are implemented
      with tasks, not with asynchronous I/O for instance.
 
+   - Should we have an unsubscribe() operation ?
+     Not so useful on promises, but more useful on observables
+
    - Can we get rid of `Unrestricted_Access` ?
      These are used so that one can write "new A" directly in the call
      to `When_Done`, but this unsafe.
