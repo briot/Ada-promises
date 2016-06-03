@@ -20,26 +20,26 @@ procedure Test_Promises is
 begin
    Put_Line ("=== Create chain");
    P := Get_Promise;
-   Start (P and (new Convert_Int & new Display_Int)
-            and new Convert_Float
-            and (new Display_String & new Display_String));
+   Subscribe (P and (new Convert_Int & new Display_Int)
+                and new Convert_Float
+                and (new Display_String & new Display_String));
 
    Put_Line ("Resolving...");
-   P.Resolve (2);
+   P.Set_Value (2);
 
    Put_Line ("=== Create chain, will Fail");
    P := Get_Promise;
-   Start (P and new Convert_Int
-            and new Convert_Float
-            and new Display_String);
+   Subscribe (P and new Convert_Int
+                and new Convert_Float
+                and new Display_String);
    Put_Line ("Failing...");
-   P.Fail ("Explicit failure");
+   P.Set_Error ("Explicit failure");
 
    Put_Line ("=== Create chain, will Fail in middle");
    P := Get_Promise;
-   Start (P and new Convert_Int
-            and new Fail_On_Float
-            and (new Display_String & new Display_String));
-   P.Resolve (3);
+   Subscribe (P and new Convert_Int
+                and new Fail_On_Float
+                and (new Display_String & new Display_String));
+   P.Set_Value (3);
 
 end Test_Promises;

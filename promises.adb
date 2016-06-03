@@ -5,12 +5,6 @@ with GNAT.Strings;       use GNAT.Strings;
 
 package body Promises is
 
-   procedure Unchecked_Free is new Ada.Unchecked_Deallocation
-      (Impl.Promise_Callback'Class, Impl.Promise_Callback_Access);
-
-   procedure Free (Cb : in out Impl.Promise_Callback_Access);
-   --  Free the memory associated with Cb
-
    package Cb_Vectors is new Ada.Containers.Vectors
       (Positive, Impl.Promise_Callback_Access, Impl."=");
 
@@ -55,22 +49,24 @@ package body Promises is
    -- Free --
    ----------
 
-   procedure Free (Cb : in out Impl.Promise_Callback_Access) is
+   procedure Free (Self : in out Freeable_Access) is
+      procedure Unchecked_Free is new Ada.Unchecked_Deallocation
+         (IFreeable'Class, Freeable_Access);
    begin
-      if Cb /= null then
-         Impl.Free (Cb.all);
-         Unchecked_Free (Cb);
+      if Self /= null then
+         Free (Self.all);
+         Unchecked_Free (Self);
       end if;
    end Free;
 
-   -----------
-   -- Start --
-   -----------
+   ---------------
+   -- Subscribe --
+   ---------------
 
-   procedure Start (Self : Promise_Chain) is
+   procedure Subscribe (Self : Promise_Chain) is
    begin
       null;
-   end Start;
+   end Subscribe;
 
    --------------
    -- Promises --
@@ -144,11 +140,11 @@ package body Promises is
          end case;
       end Free;
 
-      -------------
-      -- Resolve --
-      -------------
+      ---------------
+      -- Set_Value --
+      ---------------
 
-      procedure Resolve (Self : in out Promise; R : T) is
+      procedure Set_Value (Self : in out Promise; R : T) is
       begin
          --  ??? Checking the state is superfluous since this is in the
          --  preconditions.
@@ -156,20 +152,20 @@ package body Promises is
          --  like GNATCOLL.Atomics.Sync_Bool_Compare_And_Swap
          if Self.Get_Data.State = Pending then
             for Cb of Self.Get_Data.Callbacks loop
-               Callback_Access (Cb).Resolved (R);
-               Free (Impl.Promise_Callback_Access (Cb));
+               Callback_Access (Cb).On_Next (R);
+               Free (Freeable_Access (Cb));
             end loop;
 
             Self.Set
                (Data => Promise_Data'(State => Resolved, Value => new T'(R)));
          end if;
-      end Resolve;
+      end Set_Value;
 
-      -------------
-      -- Fail --
-      -------------
+      ---------------
+      -- Set_Error --
+      ---------------
 
-      procedure Fail (Self : in out Promise; Reason : String) is
+      procedure Set_Error (Self : in out Promise; Reason : String) is
       begin
          --  ??? Checking the state is superfluous since this is in the
          --  preconditions.
@@ -177,25 +173,25 @@ package body Promises is
          --  like GNATCOLL.Atomics.Sync_Bool_Compare_And_Swap
          if Self.Get_Data.State = Pending then
             for Cb of Self.Get_Data.Callbacks loop
-               Cb.Failed (Reason);
-               Free (Impl.Promise_Callback_Access (Cb));
+               Cb.On_Error (Reason);
+               Free (Freeable_Access (Cb));
             end loop;
 
             Self.Set
                (Data => Promise_Data'
                   (State => Failed, Reason => new String'(Reason)));
          end if;
-      end Fail;
+      end Set_Error;
 
       ---------------
-      -- When_Done --
+      -- Subscribe --
       ---------------
 
-      procedure When_Done
+      procedure Subscribe
         (Self : Promise; Cb : not null access Callback'Class)
       is
          --  ??? Unrestricted_Access is temporary, so that user can
-         --  use "new Cb" directly in the call to When_Done.
+         --  use "new Cb" directly in the call to Subscribe.
          C : Callback_Access := Cb.all'Unrestricted_Access;
       begin
          case Self.Get_Data.State is
@@ -204,14 +200,14 @@ package body Promises is
                   (Impl.Promise_Callback_Access (C));
 
             when Resolved =>
-               C.Resolved (Self.Get_Data.Value.all);
-               Free (Impl.Promise_Callback_Access (C));
+               C.On_Next (Self.Get_Data.Value.all);
+               Free (Freeable_Access (C));
 
             when Failed =>
-               C.Failed (Self.Get_Data.Reason.all);
-               Free (Impl.Promise_Callback_Access (C));
+               C.On_Error (Self.Get_Data.Reason.all);
+               Free (Freeable_Access (C));
          end case;
-      end When_Done;
+      end Subscribe;
 
       -----------
       -- "and" --
@@ -222,7 +218,7 @@ package body Promises is
          return Promise_Chain is
       begin
          for C of Cb loop
-            Self.When_Done (C);
+            Self.Subscribe (C);
          end loop;
          return Promise_Chain'(null record);
       end "and";
@@ -236,7 +232,7 @@ package body Promises is
           Cb    : not null access Callback'Class)
          return Promise_Chain is
       begin
-         Self.When_Done (Cb);
+         Self.Subscribe (Cb);
          return Promise_Chain'(null record);
       end "and";
 
@@ -283,7 +279,7 @@ package body Promises is
          return Output_Promises.Promise is
       begin
          Cb.Promise := Output_Promises.Create;
-         Input_Promises.When_Done (Input, Cb.all'Unrestricted_Access);
+         Input_Promises.Subscribe (Input, Cb.all'Unrestricted_Access);
          return Cb.Promise;
       end "and";
 
@@ -299,7 +295,7 @@ package body Promises is
          P : constant Output_Promises.Promise := Input and Cb.Cb;
       begin
          for C of Cb.Cb2 loop
-            Input_Promises.When_Done (Input, C);
+            Input_Promises.Subscribe (Input, C);
          end loop;
          return P;
       end "and";
@@ -324,29 +320,29 @@ package body Promises is
          return Self.Cb.Promise.Is_Created;
       end Is_Registered;
 
-      --------------
-      -- Resolved --
-      --------------
+      -------------
+      -- On_Next --
+      -------------
 
-      overriding procedure Resolved
+      overriding procedure On_Next
          (Self : in out Callback; P : Input_Promises.Result_Type) is
       begin
-         Resolved (Callback'Class (Self), P, Self.Promise);
+         On_Next (Callback'Class (Self), P, Self.Promise);
       exception
          when E : others =>
-            Self.Promise.Fail (Exception_Message (E));
-      end Resolved;
+            Self.Promise.Set_Error (Exception_Message (E));
+      end On_Next;
 
-      ------------
-      -- Failed --
-      ------------
+      --------------
+      -- On_Error --
+      --------------
 
-      overriding procedure Failed
+      overriding procedure On_Error
          (Self : in out Callback; Reason : String) is
       begin
          --  Propagate the failure
-         Self.Promise.Fail (Reason);
-      end Failed;
+         Self.Promise.Set_Error (Reason);
+      end On_Error;
 
       -----------
       -- "&" --

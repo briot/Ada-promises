@@ -16,17 +16,17 @@
 --       package Str_Promises is new Promises (String);
 --
 --       type Process_Page is new Str_Promises.Callback with null record;
---       overriding procedure Resolved
+--       overriding procedure On_Next
 --          (Self : in out Process_Page; Page : String)
 --       is
 --       begin
 --          Put_Line ("Page contents is known: " & Page);
---       end Resolved;
+--       end On_Next;
 --
 --       P : Str_Promises.Promise;
 --
 --       P := Fetch_URL_Asynchronously ("http://...");
---       P.When_Done (new Process_Page);
+--       P.Subscribe (new Process_Page);
 --
 --   Where Fetch_URL_Asynchronously could run in a task, connect to a
 --   web server and query a document.
@@ -41,21 +41,21 @@
 --       use Str_To_Int, Int_Promises;
 --
 --       type Count_Elements is new Str_Promises.Callback with null record;
---       overriding procedure Resolved
+--       overriding procedure On_Next
 --          (Self : in out Process_Page; Page : String);
 --       --  For instance, count the number of elements in the XML
 --
 --       type Report_Count is new Int_Promises.Callback with null record;
---       overriding procedure Resolved
+--       overriding procedure On_Next
 --          (Self : in out Report_Count; Count : Integer);
 --       --  For instance display the number of elements in a GUI
 --
 --       P : Str_Promises.Promise;
 --
---       Start
+--       Subscribe
 --          (Fetch_URL_Asynchronously ("http://...")
 --           and new Count_Elements
---           and> new Report_Count);
+--           and new Report_Count);
 --
 --   The code above returns immediately, even though the URL will be fetched
 --   in the background (which could take a few seconds), then parsed to count
@@ -77,9 +77,10 @@
 --     - Pending: the promise has no associated value yet. Some subprogram is
 --                still running to fetch that value.
 --     - Resolved: the routine has successfully finished running, and given
---                an actual value to the promise.
+--                an actual value to the promise (via a call to Set_Value)
 --     - Failed: the routine failed, and no value will ever be provided to the
---                routine.
+--                routine. A reason for the failure is provided via a call
+--                to Set_Error)
 --
 --   * Any number of callbacks can be set on a routine. They will all be
 --     executed once when the promise is resolved or failed. They are never
@@ -102,7 +103,7 @@
 --
 --  The syntax to chain promises is:
 --
---       Start (P and new A and new B and new C;
+--       Subscribe (P and new A and new B and new C;
 --
 --  Let's take the following chain:
 --
@@ -116,19 +117,20 @@
 --  from the previous release unless overridden):
 --
 --       promises                                    calls
---  If P is resolved:           A.Resolved (P.V)
---     If A.P is resolved:         B.Resolved (A.V)
---        if B.P is resolved:        C.Resolved (B.V)
---        else B.P failed:           C.Failed (B.R)
---     else A.P failed:            B.Failed (A.R), C.Failed (B.R)
---  else P failed:              A.Failed (P.R), B.Failed (A.R), C.Failed (B.R)
+--  If P is resolved:           A.On_Next (P.V)
+--     If A.P is resolved:         B.On_Next (A.V)
+--        if B.P is resolved:        C.On_Next (B.V)
+--        else B.P failed:           C.On_Error (B.R)
+--     else A.P failed:            B.On_Error (A.R), C.On_Error (B.R)
+--  else P failed:              A.On_Error (P.R), B.On_Error (A.R),
+--                                 C.On_Error (B.R)
 --
 --
 --  Q: What if I want multiple callbacks on the same promise ?
 --  A: You need to use intermediate variables, as in:
 --       Q := P and new A;
---       Start (Q and new B);
---       Start (Q and new C);
+--       Subscribe (Q and new B);
+--       Subscribe (Q and new C);
 --     Where both B and C are callbacks on A's return promise (and not
 --     chained together).
 --
@@ -138,22 +140,22 @@
 --           and (new C & new D)        --  C.P is passed on to the next step
 --           and new E;
 --
---         If P is resolved:            A.Resolved (P.V), B.Resolved (P.V)
---            if A.P is resolved:         C.Resolved (A.V), D.Resolved (A.V)
---               if C.P is resolved:        E.Resolved (C.V)
---               else C.P failed:           E.Failed (C.R)
---            else A.P failed:            C.Failed (A.R), D.Failed (A.R),
---                                          E.Failed (C.R)
---         else P failed:               A.Failed (P.R), B.Failed (P.R),
---                                      C.Failed (A.R), D.Failed (A.R),
---                                      E.Failed (C.R)
+--         If P is resolved:            A.On_Next (P.V), B.On_Next (P.V)
+--            if A.P is resolved:         C.On_Next (A.V), D.On_Next (A.V)
+--               if C.P is resolved:        E.On_Next (C.V)
+--               else C.P failed:           E.On_Error (C.R)
+--            else A.P failed:            C.On_Error (A.R), D.On_Error (A.R),
+--                                          E.On_Error (C.R)
+--         else P failed:               A.On_Error (P.R), B.On_Error (P.R),
+--                                      C.On_Error (A.R), D.On_Error (A.R),
+--                                      E.On_Error (C.R)
 --
 --      Note that there is no guaranteed order in which the callbacks are
---      executed, so for instance it is possible that C.Resolved and
---      E.Resolved are called before B.Resolved.
+--      executed, so for instance it is possible that C.On_Next and
+--      E.On_Next are called before B.On_Next.
 --
 --  Q: What if I want different resolve and failure callbacks ?
---  A: A callback is an object with both a Resolved and a Failed primitive
+--  A: A callback is an object with both a On_Next and a On_Error primitive
 --     operations. So you could set two different callbacks on the same
 --     promise (as we did above in the first question)
 
@@ -165,12 +167,27 @@ package Promises is
    --  The various states that a promise can have
 
    type Promise_Chain is tagged private;
-   procedure Start (Self : Promise_Chain) with Inline => True;
+   procedure Subscribe (Self : Promise_Chain) with Inline => True;
    --  A dummy type used when chaining promises with the "and"
    --  operator. See below for an example of code.
    --
    --  Do not mark this procedure as "is null", since otherwise GNAT
    --  does not even call the last "and" in the chain.
+
+   --------------
+   -- IFreeable --
+   --------------
+
+   type IFreeable is interface;
+   type Freeable_Access is access all IFreeable'Class;
+   --  a general interface for objects that have an explicit Free
+   --  primitive operation.
+
+   procedure Free (Self : in out IFreeable) is null;
+   --  Free internal data of Self
+
+   procedure Free (Self : in out Freeable_Access);
+   --  Free self, via its primitive operation, and then free the pointer
 
    ----------
    -- Impl --
@@ -186,7 +203,7 @@ package Promises is
       procedure Free (Self : in out Abstract_Promise_Data) is null;
       procedure Dispatch_Free (Self : in out Abstract_Promise_Data'Class);
 
-      type Abstract_Promise is interface;
+      type IAbstract_Promise is interface;
 
       package Promise_Pointers is new GNATCOLL.Refcount.Shared_Pointers
          (Element_Type           => Abstract_Promise_Data'Class,
@@ -194,7 +211,7 @@ package Promises is
           Atomic_Counters        => True,   --  thread-safe
           Potentially_Controlled => True);  --  a vector is controlled
       type Root_Promise is
-         new Promise_Pointers.Ref and Abstract_Promise with null record;
+         new Promise_Pointers.Ref and IAbstract_Promise with null record;
 
       function Is_Created (Self : Root_Promise'Class) return Boolean
         with Inline;
@@ -210,15 +227,12 @@ package Promises is
       -- Callbacks --
       ---------------
 
-      type Promise_Callback is interface;
-      type Promise_Callback_Access is access all Promise_Callback'Class;
+      type IPromise_Callback is interface and IFreeable;
+      type Promise_Callback_Access is access all IPromise_Callback'Class;
 
-      procedure Failed
-         (Self : in out Promise_Callback; Reason : String) is null;
+      procedure On_Error
+         (Self : in out IPromise_Callback; Reason : String) is null;
       --  Called when a promise has failed and will never be resolved.
-
-      procedure Free (Self : in out Promise_Callback) is null;
-      --  Free the memory associated with Callback
 
    end Impl;
 
@@ -230,7 +244,7 @@ package Promises is
       type T (<>) is private;
    package Promises is
 
-      type Promise is new Impl.Abstract_Promise with private;
+      type Promise is new Impl.IAbstract_Promise with private;
       --  A promise is a smart pointer: it is a wrapper around shared
       --  data that is freed when no more reference to the promise
       --  exists.
@@ -241,12 +255,16 @@ package Promises is
       -- Callbacks --
       ---------------
 
-      type Callback is interface and Impl.Promise_Callback;
+      type Callback is interface and Impl.IPromise_Callback;
       type Callback_Access is access all Callback'Class;
 
-      procedure Resolved (Self : in out Callback; R : Result_Type) is null;
+      procedure On_Next (Self : in out Callback; R : Result_Type) is null;
       --  Executed when a promise is resolved. It provides the real value
       --  associated with the promise.
+
+      type Callback_List (<>) is private;
+      --  Multiple callbacks, all subscribed to the same promise (or
+      --  will be subscribed to the same promise).
 
       --------------
       -- Promises --
@@ -258,29 +276,31 @@ package Promises is
              and Create'Result.Get_State = Pending;
       --  Create a new promise, with no associated value.
 
-      procedure Resolve (Self : in out Promise; R : T)
+      procedure Set_Value (Self : in out Promise; R : T)
         with
           Pre => Self.Is_Created and Self.Get_State = Pending,
           Post => Self.Get_State = Resolved;
       --  Give a result to the promise.
-      --  The callbacks' Resolved method is executed.
+      --  The callbacks' On_Next methods are executed.
       --  This can only be called once on a promise.
 
-      procedure Fail (Self : in out Promise; Reason : String)
+      procedure Set_Error (Self : in out Promise; Reason : String)
         with
           Pre => Self.Is_Created and Self.Get_State = Pending,
           Post => Self.Get_State = Failed;
       --  Mark the promise has failed. It will never be resolved.
-      --  The callbacks' Failed method is executed.
+      --  The callbacks' On_Error method are executed.
 
-      procedure When_Done
+      procedure Subscribe
         (Self : Promise;
          Cb   : not null access Callback'Class)
         with Pre => Self.Is_Created;
       function "and"
         (Self  : Promise;
-         Cb    : not null access Callback'Class)
-        return Promise_Chain
+         Cb    : not null access Callback'Class) return Promise_Chain
+        with Pre => Self.Is_Created;
+      function "and"
+        (Self : Promise; Cb : Callback_List) return Promise_Chain
         with Pre => Self.Is_Created;
       --  Will call Cb when Self is resolved or failed (or immediately if Self
       --  has already been resolved or failed).
@@ -290,32 +310,27 @@ package Promises is
       --
       --  Cb must be allocated specifically for this call, and will be
       --  freed as needed. You must not reuse the same pointer for multiple
-      --  calls to When_Done.
+      --  calls to Subscribe.
       --  ??? This is unsafe
       --
       --  Self is modified, but does not need to be "in out" since a promise
-      --  is a pointer. This means that When_Done can be directly called on
+      --  is a pointer. This means that Subscribe can be directly called on
       --  the result of a function call, for instance.
-
-      type Callback_List (<>) is private;
 
       function "&"
         (Cb    : not null access Callback'Class;
-         Cb2   : not null access Callback'Class)
-        return Callback_List;
+         Cb2   : not null access Callback'Class) return Callback_List;
       function "&"
         (List  : Callback_List;
-         Cb2   : not null access Callback'Class)
-        return Callback_List;
-
-      function "and"
-        (Self : Promise; Cb : Callback_List)
-        return Promise_Chain;
+         Cb2   : not null access Callback'Class) return Callback_List;
+      --  Create a list of callbacks that will all be subscribed to the same
+      --  promise.
 
       function Is_Created
          (Self : Promise'Class) return Boolean with Inline_Always;
       function Get_State
          (Self : Promise'Class) return Promise_State with Inline_Always;
+      --  Used for pre and post conditions
 
    private
       type Promise is new Impl.Root_Promise with null record;
@@ -340,7 +355,7 @@ package Promises is
 
       type Callback is abstract new Input_Promises.Callback
          with private;
-      procedure Resolved
+      procedure On_Next
         (Self   : in out Callback;
          Input  : Input_Promises.Result_Type;
          Output : in out Output_Promises.Promise)
@@ -396,7 +411,7 @@ package Promises is
       --      P & (new A and new B) & new C
       --  Only Cb is expected to output a promise, which will be
       --  forwarded to the next step (C in this example). Cb2 only
-      --  gets notified via its Resolved and Failed primitives.
+      --  gets notified via its On_Next and On_Error primitives.
 
       function "and"
         (Input : Input_Promises.Promise;
@@ -412,9 +427,9 @@ package Promises is
       type Callback is abstract new Input_Promises.Callback with record
          Promise : aliased Output_Promises.Promise;
       end record;
-      overriding procedure Resolved
+      overriding procedure On_Next
          (Self : in out Callback; P : Input_Promises.Result_Type);
-      overriding procedure Failed (Self : in out Callback; Reason : String);
+      overriding procedure On_Error (Self : in out Callback; Reason : String);
 
       type Callback_Array is array (Natural range <>)
          of not null access Input_Promises.Callback'Class;
